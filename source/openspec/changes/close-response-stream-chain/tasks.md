@@ -1,0 +1,3 @@
+- [x] Close nested response iterators on completion, failure and cancellation.
+- [x] Prove the composed wrapper chain releases the underlying source exactly once.
+- [x] Verify existing stream, replay and cancellation checks.
