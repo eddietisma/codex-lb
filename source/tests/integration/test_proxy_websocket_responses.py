@@ -2643,6 +2643,7 @@ def test_backend_responses_websocket_proxies_and_persists_conversation_id(
                     {"role": "user", "content": [{"type": "input_text", "text": "hi"}]},
                 ],
                 "reasoning": {"effort": "high", "context": "all_turns"},
+                "parallel_tool_calls": False,
                 "client_metadata": {
                     "x-codex-turn-metadata": (
                         '{"installation_id":"account-installation","turn_id":"turn_123","sandbox":"workspace-write"}'
@@ -3004,6 +3005,7 @@ def test_backend_responses_websocket_lite_marker_requires_previous_response_link
     lite_request = {
         "type": "response.create",
         "model": "gpt-5.6-sol",
+        "parallel_tool_calls": True,
         "instructions": "",
         "input": [
             {
@@ -3020,6 +3022,7 @@ def test_backend_responses_websocket_lite_marker_requires_previous_response_link
         request: dict[str, object] = {
             "type": "response.create",
             "model": "gpt-5.6-sol",
+            "parallel_tool_calls": True,
             "instructions": "",
             "input": [{"role": "user", "content": [{"type": "input_text", "text": "continue"}]}],
             "client_metadata": {marker: "true"},
@@ -3060,6 +3063,7 @@ def test_backend_responses_websocket_lite_marker_requires_previous_response_link
 
     sent_payloads = [json.loads(text) for text in fake_upstream.sent_text]
     assert len(sent_payloads) == 5
+    assert [sent["parallel_tool_calls"] for sent in sent_payloads] == [False, False, True, True, False]
     assert cast(dict[str, object], sent_payloads[0]["client_metadata"])[marker] == "true"
     assert sent_payloads[0]["reasoning"] == {"context": "all_turns"}
     assert cast(dict[str, object], sent_payloads[1]["client_metadata"])[marker] == "true"
