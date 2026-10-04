@@ -1,0 +1,7 @@
+The generation control does not reference stored provider state. It requests a generated turn when true and a no-generation prewarm when false. Rejecting this known control as an unknown field incorrectly made otherwise self-contained requests require their initial account during reconnect.
+
+The regression uses the real WebSocket route and connect/selection logic. Upstream responses and account selection are controlled: the first account returns a pre-created usage-limit rejection and becomes ineligible, while a healthy replacement remains available. Both routes and both boolean values originally produced an owner-unavailable error; all four now complete on the replacement with the control preserved.
+
+Live failures had no previous-response anchor, and two of the initial three were logged as prewarm requests. Historical request bodies were not archived, so those records do not prove this was the only cause of every live owner failure. The fix addresses the independently reproduced generation-control defect. Existing account-owned files, conversation/response references, unsupported tools and unknown fields still block cross-account replay.
+
+Validation covers 3,097 affected WebSocket, HTTP bridge, replay-safety and proxy utility cases. The previously confirmed idle-recovery timeout also reproduces on unchanged main and is excluded. Ruff, typing and proxy architecture, cancellation-safety and timing-seam checks pass.

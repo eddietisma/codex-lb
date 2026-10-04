@@ -1,0 +1,4 @@
+- [x] Reproduce quota failure and owner binding through the real WebSocket connect path. Four route/control combinations fail before the fix.
+- [x] Accept only boolean generate controls in otherwise account-neutral requests.
+- [x] Verify prewarm and generated-turn failover without weakening ownership checks. All 17 focused cases pass.
+- [x] Validate affected tests, static checks and OpenSpec. All 3,097 affected cases pass; the previously confirmed idle-recovery timeout is excluded.

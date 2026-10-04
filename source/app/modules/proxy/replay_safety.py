@@ -134,6 +134,7 @@ _RESPONSES_PAYLOAD_FIELDS_WITH_DEDICATED_VALIDATION = frozenset(
     {
         "conversation",
         "client_metadata",
+        "generate",
         "include",
         "input",
         "instructions",
@@ -738,6 +739,8 @@ def responses_payload_is_account_neutral_fresh_replay(payload: Mapping[str, Json
     if payload.get("prompt") not in (None, ""):
         return False
     if any(key not in _RESPONSES_PAYLOAD_FIELDS_WITH_DEDICATED_VALIDATION for key in payload):
+        return False
+    if "generate" in payload and not isinstance(payload["generate"], bool):
         return False
     if not _reasoning_config_is_account_neutral(payload.get("reasoning")):
         return False
