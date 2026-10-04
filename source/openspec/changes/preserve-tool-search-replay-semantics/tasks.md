@@ -1,0 +1,5 @@
+- [x] Preserve and validate completed client-executed tool-search pairs.
+- [x] Sanitize response-owned IDs for both HTTP bridge and WebSocket fresh replay.
+- [x] Keep existing owner-bound and unsupported-tool rejection behavior.
+- [x] Verify projection, transport, owner-loss and malformed-pair regressions.
+- [x] Validate OpenSpec and static checks.

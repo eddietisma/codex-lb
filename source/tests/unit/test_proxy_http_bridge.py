@@ -28541,6 +28541,22 @@ async def test_stream_via_http_bridge_projects_plaintext_durable_full_resend_whe
             "internal_chat_message_metadata_passthrough": owner_metadata,
         },
         {
+            "type": "tool_search_call",
+            "call_id": "call_search",
+            "arguments": {"query": "docs"},
+            "execution": "client",
+            "status": "completed",
+            "internal_chat_message_metadata_passthrough": owner_metadata,
+        },
+        {
+            "type": "tool_search_output",
+            "call_id": "call_search",
+            "execution": "client",
+            "status": "completed",
+            "tools": [],
+            "internal_chat_message_metadata_passthrough": owner_metadata,
+        },
+        {
             "type": "message",
             "role": "assistant",
             "status": "completed",
@@ -47180,7 +47196,9 @@ async def test_process_http_bridge_upstream_text_fast_path_only_frames_text_that
     assert _relay_parity_parallel_patch_inputs(downstream_blocks[-1]) == ["C"]
     assert "response.output_text.delta" in fast_path_event_types
     assert "response.reasoning_summary_text.delta" in fast_path_event_types
-    assert "response.output_item.done" not in fast_path_event_types
+    # Both raw tool events are framed before deduplication. Mutated downstream
+    # payloads must not reuse that upstream text through the identity fast path.
+    assert fast_path_event_types.count("response.output_item.done") == 2
 
 
 @pytest.mark.asyncio
