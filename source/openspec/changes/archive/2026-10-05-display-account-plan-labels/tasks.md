@@ -1,0 +1,4 @@
+- [x] Add one shared plan display formatter and use it at plan-label call sites.
+- [x] Match account searches against the displayed plan name.
+- [x] Verify existing affected frontend checks and build the dashboard.
+- [x] Verify Pro 200 and Business Premium display labels and unchanged backend plan identifiers.

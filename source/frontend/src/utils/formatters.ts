@@ -127,6 +127,12 @@ export function formatSlug(value: string): string {
   return words.join(" ");
 }
 
+export function formatPlanType(value: string): string {
+  if (value === "pro") return "Pro 200";
+  if (value === "prolite") return "Business Premium";
+  return formatSlug(value);
+}
+
 export function toNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;

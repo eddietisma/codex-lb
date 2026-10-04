@@ -24,7 +24,7 @@ import {
   formatPercentNullable,
   formatQuotaResetLabel,
   formatSingleUnitRemaining,
-  formatSlug,
+  formatPlanType, formatSlug,
 } from "@/utils/formatters";
 
 const ACCOUNT_LIST_VISIBLE_ROWS = 8;
@@ -171,7 +171,7 @@ function compareAccountsBySort(a: AccountSummary, b: AccountSummary, sort: Accou
       result = compareText(normalizeStatus(a.status), normalizeStatus(b.status));
       break;
     case "plan":
-      result = compareText(formatSlug(a.planType), formatSlug(b.planType));
+      result = compareText(formatPlanType(a.planType), formatPlanType(b.planType));
       break;
     case "quota":
       result = compareNullableNumber(accountQuotaSortValue(a), accountQuotaSortValue(b), sort.direction);
@@ -405,7 +405,7 @@ export function AccountList({
 	                </p>
               </div>
               <StatusBadge status={status} />
-              <span className="text-xs text-muted-foreground">{formatSlug(account.planType)}</span>
+              <span className="text-xs text-muted-foreground">{formatPlanType(account.planType)}</span>
               <AccountQuotaCells account={account} />
 	              <span className="font-medium tabular-nums">
 	                {formatCreditValue(accountSubscriptionCredits(account))}

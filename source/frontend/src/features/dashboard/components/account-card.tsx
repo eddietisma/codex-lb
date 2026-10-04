@@ -24,7 +24,7 @@ import {
   formatPercentNullable,
   formatQuotaResetLabel,
   formatSingleUnitRemaining,
-  formatSlug,
+  formatPlanType, formatSlug,
 } from "@/utils/formatters";
 
 export type AccountAction = "details" | "resume" | "reauth" | "warmup-toggle" | "reset-credit";
@@ -109,7 +109,7 @@ export function AccountCard({ account, showAccountId = false, readOnly = false, 
 
   const title = account.displayName || account.email;
   const compactId = formatCompactAccountId(account.accountId);
-  const planLabel = formatSlug(account.planType);
+  const planLabel = formatPlanType(account.planType);
   const emailSubtitle =
     account.displayName && account.displayName !== account.email
       ? account.email

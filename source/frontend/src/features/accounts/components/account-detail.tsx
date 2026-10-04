@@ -23,7 +23,7 @@ import type {
   UpstreamProxyEndpointTestResponse,
 } from "@/features/settings/schemas";
 import { formatCompactAccountId } from "@/utils/account-identifiers";
-import { formatSlug } from "@/utils/formatters";
+import { formatPlanType, formatSlug } from "@/utils/formatters";
 
 export type AccountDetailProps = {
   account: AccountSummary | null;
@@ -148,7 +148,7 @@ export function AccountDetail({
           </p>
         ) : null}
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {workspaceLabel} | {formatSlug(account.planType)}{seatLabel}
+          {workspaceLabel} | {formatPlanType(account.planType)}{seatLabel}
         </p>
       </div>
 

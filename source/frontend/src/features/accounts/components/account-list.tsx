@@ -23,7 +23,7 @@ import {
 } from "@/features/accounts/sorting";
 import { useAccountQuotaDisplayStore } from "@/hooks/use-account-quota-display";
 import { cn } from "@/lib/utils";
-import { formatSlug } from "@/utils/formatters";
+import { formatPlanType, formatSlug } from "@/utils/formatters";
 
 const STATUS_FILTER_OPTIONS = ["all", "active", "paused", "rate_limited", "quota_exceeded", "reauth_required", "deactivated"];
 
@@ -72,7 +72,8 @@ export function AccountList({
         (account.alias?.toLowerCase().includes(needle) ?? false) ||
         account.displayName.toLowerCase().includes(needle) ||
         account.accountId.toLowerCase().includes(needle) ||
-        account.planType.toLowerCase().includes(needle)
+        account.planType.toLowerCase().includes(needle) ||
+        formatPlanType(account.planType).toLowerCase().includes(needle)
       );
     });
   }, [accounts, quotaDisplay, search, statusFilter, activeSortMode]);
