@@ -252,6 +252,7 @@ from app.modules.proxy.affinity import (
     _sticky_key_for_responses_request,
     _sticky_key_from_session_header,
     _sticky_key_from_turn_state_header,
+    ensure_http_downstream_turn_state,
 )
 from app.modules.proxy.affinity_observation import AffinityObservation
 from app.modules.proxy.api_key_usage import estimate_api_key_request_usage
@@ -890,6 +891,23 @@ async def _registered_turn_state_anchor_lookup(
 
 
 class _HTTPBridgeStreamingMixin:
+    async def prepare_http_bridge_turn_state(
+        self: Any,
+        headers: Mapping[str, str],
+        *,
+        model: str,
+        api_key: ApiKeyData | None,
+    ) -> str:
+        incoming_turn_state = _sticky_key_from_turn_state_header(headers)
+        if incoming_turn_state is not None:
+            lookup = await self._durable_bridge.lookup_turn_state_target(
+                turn_state=incoming_turn_state,
+                api_key_id=api_key.id if api_key is not None else None,
+            )
+            if lookup is not None and not _http_bridge_models_compatible(lookup.model, model):
+                return ensure_http_downstream_turn_state({})
+        return ensure_http_downstream_turn_state(headers)
+
     async def validate_http_bridge_legacy_forward_anchor(
         self: Any,
         *,

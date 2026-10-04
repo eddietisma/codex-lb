@@ -4511,6 +4511,13 @@ async def v1_chat_completions(
         if source is None
         else False
     )
+    downstream_turn_state = (
+        await context.service.prepare_http_bridge_turn_state(
+            request.headers, model=responses_payload.model, api_key=api_key
+        )
+        if bridge_active
+        else None
+    )
     reservation = await _enforce_request_limits(
         api_key,
         request_model=request_model,
@@ -4534,8 +4541,7 @@ async def v1_chat_completions(
             prohibit_fast_mode=prohibit_fast_mode,
         )
     responses_payload.stream = True
-    if bridge_active:
-        downstream_turn_state = proxy_affinity_module.ensure_http_downstream_turn_state(request.headers)
+    if downstream_turn_state is not None:
         rate_limit_headers = {
             **rate_limit_headers,
             **proxy_affinity_module.build_downstream_turn_state_response_headers(downstream_turn_state),
@@ -6427,13 +6433,19 @@ async def _stream_responses(
         policy_already_applied=forwarded_request,
     )
     client_ip = forwarded_client_ip if forwarded_request else resolve_request_client_host(request)
-    downstream_turn_state = (
-        forwarded_downstream_turn_state
-        if bridge_active and forwarded_downstream_turn_state is not None
-        else proxy_affinity_module.ensure_http_downstream_turn_state(effective_headers)
-        if bridge_active
-        else None
-    )
+    try:
+        downstream_turn_state = (
+            forwarded_downstream_turn_state
+            if bridge_active and forwarded_downstream_turn_state is not None
+            else await context.service.prepare_http_bridge_turn_state(
+                effective_headers, model=payload.model, api_key=api_key
+            )
+            if bridge_active
+            else None
+        )
+    except BaseException:
+        await reservation_cleanup.release(action="turn-state preparation")
+        raise
     turn_state_headers = (
         proxy_affinity_module.build_downstream_turn_state_response_headers(downstream_turn_state)
         if downstream_turn_state is not None
@@ -6831,9 +6843,15 @@ async def _collect_responses(
         api_key,
         preferred=prefer_http_bridge,
     )
-    downstream_turn_state = (
-        proxy_affinity_module.ensure_http_downstream_turn_state(request.headers) if bridge_active else None
-    )
+    try:
+        downstream_turn_state = (
+            await context.service.prepare_http_bridge_turn_state(request.headers, model=payload.model, api_key=api_key)
+            if bridge_active
+            else None
+        )
+    except BaseException:
+        await reservation_cleanup.release(action="turn-state preparation")
+        raise
     client_ip = resolve_request_client_host(request)
     turn_state_headers = (
         proxy_affinity_module.build_downstream_turn_state_response_headers(downstream_turn_state)

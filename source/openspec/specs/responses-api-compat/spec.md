@@ -3,7 +3,9 @@
 ## Purpose
 
 Define Responses API compatibility contracts so Codex, OpenCode, and OpenAI-style clients preserve expected behavior.
+
 ## Requirements
+
 ### Requirement: Use prompt_cache_key as OpenAI cache affinity
 For OpenAI-style `/v1/responses`, `/v1/responses/compact`, and chat-completions requests mapped onto Responses, the service MUST treat a non-empty `prompt_cache_key` as the bounded upstream account affinity key for prompt-cache correctness even when a `session_id` header is present. OpenAI-style route wiring MUST NOT upgrade those requests to durable `CODEX_SESSION` affinity by default. This affinity MUST apply even when dashboard `sticky_threads_enabled` is disabled, the service MUST continue forwarding the same `prompt_cache_key` upstream unchanged, and the stored affinity MUST expire after the configured freshness window so older keys can rebalance. The freshness window MUST come from dashboard settings so operators can adjust it without restart.
 
@@ -10896,3 +10898,14 @@ SDK parser failure.
 - **WHEN** the bridge settles the turn
 - **THEN** it emits one terminal `response.failed` event
 - **AND** that terminal event includes a stable `response.id`
+
+### Requirement: Model transitions publish child turn-state tokens
+
+HTTP bridge responses MUST allocate a fresh downstream turn-state token before sending response headers when the incoming API-key-scoped durable turn-state belongs to an incompatible model. An account-neutral transition fork MUST register this token against the child session. The parent token MUST retain its original session and account ownership. Compatible-model requests and unknown incoming tokens MUST retain existing token behavior. Owner-forwarded requests MUST preserve the token assigned by the originating instance.
+
+#### Scenario: Follow-up after an account-neutral model transition
+
+- **GIVEN** a durable parent session and a model transition that requires an account-neutral child fork
+- **WHEN** the client sends the next turn using the returned token
+- **THEN** the bridge resolves the child session and reuses its upstream connection
+- **AND** the parent token still resolves to the original parent session
