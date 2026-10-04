@@ -1,0 +1,41 @@
+# Deployment credentials and runtime data
+/.env
+/.env.*
+!/.env.example
+/.envrc
+/.data*/
+/.migration/
+/.codex-lb/
+/.local/
+
+# Previous local clone retained for its Git history
+/codex-lb/
+
+# Credentials, databases, backups and captures
+*.key
+*.pem
+*.p12
+*.pfx
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.dump
+*.bak
+*.log
+
+# Generated files and local tooling
+.venv/
+.venv*/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.mypy_cache/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
