@@ -14,6 +14,7 @@ import type {
 } from "@/features/dashboard/schemas";
 import { formatCompactAccountId } from "@/utils/account-identifiers";
 import { buildDonutPalette } from "@/utils/colors";
+import { DASHBOARD_CHART_COLORS } from "@/utils/constants";
 import {
   formatCachedTokensMeta,
   formatCompactNumber,
@@ -394,7 +395,6 @@ function formatBurnWindowLabel(windowKey: "primary" | "secondary", windowMinutes
   return windowKey === "primary" ? "5h" : "7d";
 }
 
-const TREND_COLORS = ["#3b82f6", "#8b5cf6", "#10b981", "#ef4444", "#f59e0b"];
 const PRO_WEEKLY_CAPACITY_CREDITS = 50_400;
 
 function trendPointsToValues(points: TrendPoint[]): { value: number }[] {
@@ -777,7 +777,7 @@ export function buildDashboardView(
       comparison: buildStatComparison(metrics?.requests, comparison?.previous.requests ?? 0, canCompare),
       icon: Activity,
       trend: trendPointsToValues(trends.requests),
-      trendColor: TREND_COLORS[0],
+      trendColor: DASHBOARD_CHART_COLORS[0],
     },
     {
       label: t("dashboard.stats.tokens", { timeframe: timeframeLabel }),
@@ -786,7 +786,7 @@ export function buildDashboardView(
       comparison: buildStatComparison(metrics?.tokens, comparison?.previous.tokens ?? 0, canCompare),
       icon: Coins,
       trend: trendPointsToValues(trends.tokens),
-      trendColor: TREND_COLORS[1],
+      trendColor: DASHBOARD_CHART_COLORS[1],
     },
     {
       label: t("dashboard.stats.estimatedCost", { timeframe: timeframeLabel }),
@@ -795,7 +795,7 @@ export function buildDashboardView(
       comparison: buildStatComparison(cost, comparison?.previous.costUsd ?? 0, canCompare),
       icon: DollarSign,
       trend: trendPointsToValues(trends.cost),
-      trendColor: TREND_COLORS[2],
+      trendColor: DASHBOARD_CHART_COLORS[2],
     },
   ];
 
@@ -814,7 +814,7 @@ export function buildDashboardView(
       }),
       icon: MessageSquare,
       trend: trendPointsToValues(trends.conversations),
-      trendColor: TREND_COLORS[3],
+      trendColor: DASHBOARD_CHART_COLORS[3],
     });
   }
 
@@ -830,7 +830,7 @@ export function buildDashboardView(
       }),
       icon: Flame,
       trend: buildBurnTrend(trends.tokens, combinedBurnEquivalent),
-      trendColor: TREND_COLORS[3],
+      trendColor: DASHBOARD_CHART_COLORS[3],
     });
   }
 
@@ -845,7 +845,7 @@ export function buildDashboardView(
         }),
     icon: AlertTriangle,
     trend: trendPointsToValues(trends.errorRate),
-    trendColor: TREND_COLORS[4],
+    trendColor: DASHBOARD_CHART_COLORS[4],
   });
 
   const rawPrimaryItems = buildRemainingItems(overview.accounts, primaryWindow, "primary", isDark);

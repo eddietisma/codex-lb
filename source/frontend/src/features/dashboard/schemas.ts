@@ -163,6 +163,16 @@ const WeeklyCreditPaceSchema = z.object({
   confidence: z.enum(["high", "medium", "low"]),
 });
 
+export const DashboardThroughputSchema = z.object({
+  bucketStart: z.iso.datetime({ offset: true }),
+  model: z.string(),
+  reasoningEffort: z.string().nullable(),
+  planType: z.string(),
+  averageTokensPerSecond: z.number().nonnegative(),
+  sampleCount: z.number().int().positive(),
+});
+export type DashboardThroughput = z.infer<typeof DashboardThroughputSchema>;
+
 export const DashboardOverviewSchema = z.object({
   lastSyncAt: z.iso.datetime({ offset: true }).nullable(),
   timeframe: DashboardOverviewTimeframeSchema,
@@ -179,6 +189,7 @@ export const DashboardOverviewSchema = z.object({
     secondary: UsageWindowSchema.nullable(),
   }),
   trends: MetricsTrendsSchema,
+  throughput: z.array(DashboardThroughputSchema).optional(),
   additionalQuotas: z.array(AccountAdditionalQuotaSchema).default([]),
   depletionPrimary: DepletionSchema.nullable().optional(),
   depletionSecondary: DepletionSchema.nullable().optional(),

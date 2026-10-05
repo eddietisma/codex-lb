@@ -130,6 +130,15 @@ class WeeklyCreditPaceResponse(DashboardModel):
     confidence: WeeklyCreditPaceConfidence = "low"
 
 
+class DashboardThroughput(DashboardModel):
+    bucket_start: datetime
+    model: str
+    reasoning_effort: str | None
+    plan_type: str
+    average_tokens_per_second: float
+    sample_count: int
+
+
 class DashboardOverviewResponse(DashboardModel):
     last_sync_at: datetime | None = None
     timeframe: DashboardOverviewTimeframe
@@ -137,6 +146,7 @@ class DashboardOverviewResponse(DashboardModel):
     summary: DashboardOverviewSummary
     windows: DashboardUsageWindows
     trends: MetricsTrends
+    throughput: List[DashboardThroughput] = Field(default_factory=list)
     depletion_primary: DepletionResponse | None = None
     depletion_secondary: DepletionResponse | None = None
     weekly_credit_pace: WeeklyCreditPaceResponse | None = None

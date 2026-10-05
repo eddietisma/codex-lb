@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy import case, func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.plan_types import ACCOUNT_PLAN_ALIASES
 from app.core.usage.types import BucketConversationAggregate, BucketModelAggregate, RequestActivityAggregate
 from app.db.models import (
     Account,
@@ -61,6 +62,16 @@ def _store_trailing_demand(key: _TrailingDemandKey, deltas: dict[str, float], tt
         oldest = min(_trailing_demand_cache, key=lambda existing: _trailing_demand_cache[existing][1])
         _trailing_demand_cache.pop(oldest, None)
     _trailing_demand_cache[key] = (deltas, time.monotonic() + ttl_seconds)
+
+
+@dataclass(frozen=True, slots=True)
+class ThroughputAggregateRow:
+    bucket_epoch: int
+    model: str
+    reasoning_effort: str | None
+    plan_type: str
+    average_tokens_per_second: float
+    sample_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +171,41 @@ class DashboardRepository:
 
     async def aggregate_activity_since(self, since: datetime) -> RequestActivityAggregate:
         return await self._logs_repo.aggregate_activity_since(since)
+
+    async def aggregate_throughput_between(
+        self, since: datetime, until: datetime, bucket_seconds: int
+    ) -> list[ThroughputAggregateRow]:
+        raw_plan = func.lower(func.trim(func.coalesce(RequestLog.plan_type, Account.plan_type, "unknown")))
+        plan_type = case(ACCOUNT_PLAN_ALIASES, value=raw_plan, else_=raw_plan)
+        reasoning_effort = func.nullif(func.lower(func.trim(RequestLog.reasoning_effort)), "")
+        bucket_epoch = self._logs_repo._bucket_epoch_expr(bucket_seconds)
+        stmt = (
+            select(
+                bucket_epoch.label("bucket_epoch"),
+                RequestLog.model,
+                reasoning_effort.label("reasoning_effort"),
+                plan_type.label("plan_type"),
+                (func.sum(RequestLog.output_tokens) * 1000.0 / func.nullif(func.sum(RequestLog.latency_ms), 0)).label(
+                    "average_tokens_per_second"
+                ),
+                func.count().label("sample_count"),
+            )
+            .select_from(RequestLog)
+            .outerjoin(Account, Account.id == RequestLog.account_id)
+            .where(
+                RequestLog.requested_at >= since,
+                RequestLog.requested_at <= until,
+                RequestLog.deleted_at.is_(None),
+                RequestLog.status == "success",
+                RequestLog.request_kind == "normal",
+                RequestLog.output_tokens > 0,
+                RequestLog.latency_ms > 0,
+            )
+            .group_by(bucket_epoch, RequestLog.model, reasoning_effort, plan_type)
+            .order_by(bucket_epoch, RequestLog.model, reasoning_effort.asc().nulls_first(), plan_type)
+        )
+        result = await self._session.execute(stmt)
+        return [ThroughputAggregateRow(int(row.bucket_epoch), *row[1:]) for row in result]
 
     async def aggregate_activity_between(
         self,

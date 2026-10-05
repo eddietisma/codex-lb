@@ -1,11 +1,12 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { ThroughputChartSkeleton } from "./throughput-chart-skeleton";
 
-export function DashboardSkeleton() {
+export function DashboardSkeleton({ statCount = 5 }: { statCount?: number }) {
   return (
     <div className="space-y-8">
       {/* Stats grid */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className={`grid gap-3 sm:grid-cols-2 ${statCount >= 5 ? "xl:grid-cols-5" : "xl:grid-cols-4"}`}>
+        {Array.from({ length: statCount }).map((_, i) => (
           <div key={i} className="rounded-xl border bg-card p-4">
             <div className="flex items-center justify-between">
               <Skeleton className="h-3 w-20" />
@@ -19,6 +20,8 @@ export function DashboardSkeleton() {
           </div>
         ))}
       </div>
+
+      <ThroughputChartSkeleton />
 
       {/* Usage donuts + weekly runway card (mirrors the dashboard-page grid slot) */}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">

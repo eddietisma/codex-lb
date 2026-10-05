@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -30,6 +30,7 @@ import { OverviewTimeframeSelect } from "@/features/dashboard/components/filters
 import { RequestFilters } from "@/features/dashboard/components/filters/request-filters";
 import { RecentRequestsTable } from "@/features/dashboard/components/recent-requests-table";
 import { StatsGrid } from "@/features/dashboard/components/stats-grid";
+import { ThroughputChartSkeleton } from "@/features/dashboard/components/throughput-chart-skeleton";
 import { UsageDonuts } from "@/features/dashboard/components/usage-donuts";
 import { WeeklyCreditsPaceCard } from "@/features/dashboard/components/weekly-credits-pace-card";
 import { useAuthStore, usePermission } from "@/features/auth/hooks/use-auth";
@@ -56,6 +57,7 @@ import { formatModelLabel, formatCurrency, formatSlug } from "@/utils/formatters
 import { usePrivacyStore } from "@/hooks/use-privacy";
 
 const MODEL_OPTION_DELIMITER = ":::";
+const ThroughputChart = lazy(() => import("./throughput-chart").then((module) => ({ default: module.ThroughputChart })));
 
 type RetainedDashboardLoadError = {
   timeframe: OverviewTimeframe;
@@ -438,7 +440,7 @@ export function DashboardPage() {
       {(dashboardQuery.isPending || dashboardQuery.isFetching) &&
       !view &&
       displayedDashboardLoadError === null ? (
-        <DashboardSkeleton />
+        <DashboardSkeleton statCount={5 + Number(showAccountBurnrate)} />
       ) : !view ? (
         <div className="space-y-3 rounded-xl border bg-card p-4">
           <div role="alert">
@@ -470,6 +472,13 @@ export function DashboardPage() {
       ) : (
         <>
           <StatsGrid stats={view.stats} />
+
+          <Suspense fallback={<ThroughputChartSkeleton />}>
+            <ThroughputChart
+              data={overview?.throughput ?? []}
+              buckets={overview?.trends.requests.map((point) => point.t) ?? []}
+            />
+          </Suspense>
 
           {view.weeklyCreditPace ? (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">

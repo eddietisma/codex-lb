@@ -1,0 +1,4 @@
+- [x] Aggregate eligible per-bucket throughput by model, recorded effort and plan type.
+- [x] Render account-type lines, timestamp/sample-count tooltips, selector/reset controls and matching skeletons.
+- [x] Verify reasoning counted once, reasoning-only output, thinking time, missing first-token timing, request-duration-weighted means, concurrent requests, filters, time ranges, gaps and selector behavior. 32 backend and 35 frontend tests pass.
+- [x] Validate specifications, lint/typecheck and the build. Inspect the light and dark rendered chart with isolated sample data.

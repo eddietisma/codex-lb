@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from app.core import usage as usage_core
 from app.core.crypto import TokenEncryptor
@@ -21,6 +21,7 @@ from app.modules.dashboard.schemas import (
     DashboardOverviewResponse,
     DashboardOverviewTimeframeKey,
     DashboardProjectionsResponse,
+    DashboardThroughput,
     DashboardUsageWindows,
     DepletionResponse,
     WeeklyCreditApiKeyAttribution,
@@ -145,6 +146,7 @@ class DashboardService:
         )
         previous_window_start = bucket_since - timedelta(minutes=overview_timeframe.window_minutes)
         activity_aggregate = await self._repo.aggregate_activity_between(bucket_since, now)
+        throughput_rows = await self._repo.aggregate_throughput_between(bucket_since, now, overview_timeframe.bucket_seconds)
         previous_activity_aggregate = await self._repo.aggregate_activity_between(previous_window_start, bucket_since)
         top_error = await self._repo.top_error_between(bucket_since, now)
         earliest_activity_at = await self._repo.earliest_activity_at()
@@ -223,6 +225,17 @@ class DashboardService:
             summary=summary,
             windows=windows,
             trends=trends,
+            throughput=[
+                DashboardThroughput(
+                    bucket_start=datetime.fromtimestamp(row.bucket_epoch, UTC),
+                    model=row.model,
+                    reasoning_effort=row.reasoning_effort,
+                    plan_type=row.plan_type,
+                    average_tokens_per_second=round(row.average_tokens_per_second, 2),
+                    sample_count=row.sample_count,
+                )
+                for row in throughput_rows
+            ],
             weekly_credit_pace=weekly_credit_pace,
         )
 

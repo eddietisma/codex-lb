@@ -25,3 +25,4 @@ export const REQUEST_STATUS_LABELS: Record<string, string> = {
 };
 
 export const RESET_ERROR_LABEL = "--";
+export const DASHBOARD_CHART_COLORS = ["#3b82f6", "#8b5cf6", "#10b981", "#ef4444", "#f59e0b"] as const;
