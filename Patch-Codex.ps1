@@ -1,0 +1,467 @@
+<#
+Codex-lb patch and launcher. One script; requires the Node.js already installed on this PC.
+Default: detect the current Store build, prepare/reuse a patched copy, restart Codex,
+and open your normal profile. Store files are not modified.
+The runtime cache and shortcut icon are stored in Local AppData.
+-CheckOnly checks compatibility without writing or restarting.
+-PrepareOnly prepares the runtime without closing or launching Codex.
+-NoRestart refuses to launch while another Codex instance is open.
+Unknown app structures stop safely. The modified runtime copy is unsigned.
+#>
+[CmdletBinding()]
+param(
+    [switch]$CheckOnly,
+    [switch]$PrepareOnly,
+    [switch]$NoRestart,
+    [switch]$ShowErrors,
+    [string]$OutputRoot,
+    [string]$CodexHome = (Join-Path $env:USERPROFILE '.codex')
+)
+if (!$OutputRoot) { $OutputRoot = Join-Path $env:LOCALAPPDATA 'CodexProviderPatch\runtime' }
+$engineCode = @'
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { spawnSync } = require('node:child_process');
+const assert = require('node:assert/strict');
+const { transform } = (() => {
+'use strict';
+// Structural matchers are deliberately narrow: unfamiliar layouts stop the patch.
+const path = require('node:path');
+const ID = '[A-Za-z_$][\\w$]*';
+const helper = 'function codexLbUsesExternalUsage(provider){return provider===`codex-lb`}function codexLbBlocksWorkspaceUsage(provider,blocked){return blocked&&!codexLbUsesExternalUsage(provider)}';
+const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function uniqueMatches(text, regex, label) {
+  const matches = [...text.matchAll(regex)];
+  if (matches.length !== 1) throw new Error(`Unsupported app layout: ${label} matched ${matches.length} times. No patch applied.`);
+  return matches[0];
+}
+function replaceOnce(text, before, after, label, changes) {
+  const at = text.indexOf(before);
+  if (at < 0 || text.indexOf(before, at + before.length) !== -1) throw new Error(`Ambiguous patch anchor: ${label}`);
+  changes.push({ name: label, before, after });
+  return text.slice(0, at) + after + text.slice(at + before.length);
+}
+function bindings(text, kind) {
+  const clauses = kind === 'import'
+    ? [...text.matchAll(/import\{([^}]+)\}from["']([^"']+)["']/g)]
+    : [...text.matchAll(/export\{([^}]+)\}/g)];
+  return clauses.map(match => ({
+    file: match[2],
+    names: match[1].split(',').map(token => {
+      const parts = token.trim().split(/\s+as\s+/);
+      return { local: parts.at(-1), original: parts[0] };
+    }),
+  }));
+}
+function importedSelector(source, asset, readFile, pattern, label) {
+  const results = [];
+  for (const clause of bindings(source, 'import')) {
+    if (!clause.file?.endsWith('.js')) continue;
+    const file = path.posix.normalize(path.posix.join(path.posix.dirname(asset), clause.file));
+    if (!file.startsWith('webview/assets/')) throw new Error('Unexpected import path');
+    const moduleSource = readFile(file);
+    const matches = [...moduleSource.matchAll(pattern)];
+    for (const match of matches) {
+      const exports = bindings(moduleSource, 'export').flatMap(item => item.names);
+      const exported = exports.filter(item => item.original === match[1]);
+      const imported = clause.names.filter(item => exported.some(entry => entry.local === item.original));
+      for (const item of imported) results.push(item.local);
+    }
+  }
+  const candidates = [...new Set(results)];
+  if (candidates.length !== 1) throw new Error(`Unsupported app layout: cannot resolve ${label} (${candidates.length} candidates)`);
+  return candidates[0];
+}
+function transform(source, asset, readFile) {
+  if (source.includes('codexLbUsesExternalUsage')) throw new Error('Source is already patched; use the unmodified installed app.');
+  const targetAtom = importedSelector(source, asset, readFile,
+    new RegExp(`(${ID})=${ID}\\(${ID},\\(${ID},\\{get:${ID}\\}\\)=>\\{.{0,650}?return\\{activeWorkspaceRoot:`, 'g'), 'execution target atom');
+  const configAtom = importedSelector(source, asset, readFile,
+    new RegExp(`(${ID})=${ID}\\(${ID},\\(\\{cwd:(${ID})=null,hostId:(${ID})\\},\\{get:${ID},queryClient:${ID},scope:${ID}\\}\\)=>${ID}\\(\\{scope:${ID},queryClient:${ID},hostId:\\3,cwd:\\2,enabled:`, 'g'), 'effective config query');
+  const providerAtom = importedSelector(source, asset, readFile,
+    new RegExp(`(${ID})=${ID}\\(\\(\\{modelProvider:(${ID})\\}\\)=>\\2\\?\\?null\\)`, 'g'), 'thread provider atom');
+
+  const q = uniqueMatches(source,
+    new RegExp(`function (${ID})\\((${ID})\\)\\{let (${ID})=\\(0,(${ID})\\.c\\)\\(\\d+\\),\\{hostId:(${ID}),selectedModel:(${ID})\\}=\\2,(${ID})=\\5===void 0\\?(${ID}):\\5,(${ID})=(${ID})\\((${ID})\\),`, 'g'), 'usage hook');
+  const quotaName = q[1], memo = q[3], memoOwner = q[4], host = q[7], scope = q[9], scopeHook = q[10], scopeAtom = q[11];
+  const quotaStart = q.index;
+  const quotaEnd = source.indexOf('}var ' + memoOwner + ',', quotaStart) + 1;
+  if (quotaEnd <= quotaStart) throw new Error('Cannot locate usage hook boundary');
+  let quota = source.slice(quotaStart, quotaEnd);
+  if (!quota.includes('rateLimit:') || !quota.includes('sendBlocked:')) throw new Error('Unexpected usage hook output');
+  const thread = uniqueMatches(quota, new RegExp(`let (${ID})=(${ID}),${ID}=${escape(scope)}\\.value\\.kind===`, 'g'), 'usage thread');
+  const threadId = thread[1];
+  const resolver = uniqueMatches(quota, new RegExp(`${escape(thread[2])}=(${ID})\\(${escape(scope)}\\)`, 'g'), 'thread resolver')[1];
+  const usage = uniqueMatches(quota,
+    new RegExp(`\\{data:(${ID}),dataUpdatedAt:${ID}\\}=(${ID})\\((${ID})\\),(${ID})=\\2\\(${ID}\\),(${ID})=\\2\\((${ID})\\)`, 'g'), 'workspace usage atoms');
+  const rate = usage[1], queryHook = usage[2], fallback = usage[4], blocked = usage[5], quotaAtom = usage[6];
+  const injection = uniqueMatches(quota, new RegExp(`let ${ID}=(${ID})\\(${ID},${ID}\\),${ID};(?=${escape(memo)}\\[)`, 'g'), 'usage hook injection');
+  const readHook = injection[1];
+  const changes = [];
+  // Resolve minified imports in module scope: component locals may shadow them.
+  const providerHelpers = helper + `function codexLbReadTarget(thread){return ${readHook}(${targetAtom},thread)}function codexLbReadConfig(target,hostId){return ${readHook}(${configAtom},{cwd:target.cwd,hostId})}function codexLbReadProvider(thread){return ${readHook}(${providerAtom},thread)}function codexLbCurrentThread(){return ${resolver}(${scopeHook}(${scopeAtom}))}`;
+  const quotaAfter = injection[0] + `let codexLbTarget=codexLbReadTarget(${threadId}),codexLbConfig=codexLbReadConfig(codexLbTarget,${host}),codexLbProvider=codexLbReadProvider(${threadId}),codexLbExternal=codexLbTarget.hostId===${host}&&codexLbUsesExternalUsage(codexLbProvider??codexLbConfig.data?.model_provider);if(codexLbExternal){${rate}=null;${fallback}=null;${blocked}=!1}`;
+  quota = replaceOnce(quota, injection[0], quotaAfter, 'composer usage', changes);
+  let patched = replaceOnce(source, source.slice(quotaStart, quotaEnd), quota, 'usage hook replacement', []);
+  patched = replaceOnce(patched, q[0], providerHelpers + q[0], 'provider helpers', changes);
+
+  const bannerMarker = uniqueMatches(patched,
+    new RegExp(`function (${ID})\\(${ID}\\)\\{let ${ID}=\\(0,${ID}\\.c\\)\\(\\d+\\),\\{canShowUsageBanners:`, 'g'), 'usage banner');
+  const bannerStart = bannerMarker.index;
+  const bannerEnd = patched.indexOf('function ', bannerStart + bannerMarker[0].length);
+  if (bannerStart < 0 || bannerEnd < 0) throw new Error('Cannot locate usage banner function');
+  let banner = patched.slice(bannerStart, bannerEnd);
+  const bannerName = banner.match(new RegExp(`^function (${ID})\\(`))[1];
+  const early = uniqueMatches(banner,
+    new RegExp(`(${ID})=${escape(readHook)}\\(${ID},(${ID})\\);if\\(!(${ID})\\)return (${ID});`, 'g'), 'banner guard');
+  const bannerHost = early[2], bannerEnabled = early[3], content = early[4];
+  const bannerAfter = early[0].slice(0, early[0].indexOf(';') + 1) + `let codexLbThread=codexLbCurrentThread(),codexLbTarget=codexLbReadTarget(codexLbThread),codexLbConfig=codexLbReadConfig(codexLbTarget,${bannerHost}),codexLbProvider=codexLbReadProvider(codexLbThread),codexLbExternal=codexLbTarget.hostId===${bannerHost}&&codexLbUsesExternalUsage(codexLbProvider??codexLbConfig.data?.model_provider);if(!${bannerEnabled}||codexLbExternal)return ${content};`;
+  const originalBanner = banner;
+  banner = replaceOnce(banner, early[0], bannerAfter, 'usage banner', changes);
+  patched = replaceOnce(patched, originalBanner, banner, 'banner replacement', []);
+
+  const adapter = uniqueMatches(patched,
+    new RegExp(`(${ID})=${ID}\\(\\),(${ID})=${escape(queryHook)}\\(${escape(quotaAtom)}\\)&&(${ID})===\x60local\x60,(${ID})=\\1===\x60STEPS_PROSE\x60\\?${ID}:null`, 'g'), 'composer adapter quota');
+  const adapterStart = patched.lastIndexOf('function ', adapter.index);
+  const adapterHead = patched.slice(adapterStart, adapter.index);
+  const adapterThread = uniqueMatches(adapterHead,
+    new RegExp(`${escape(adapter[3])}=${escape(readHook)}\\(${ID},(${ID})\\)`, 'g'), 'adapter thread')[1];
+  const adapterAfter = `${adapter[1]}=` + adapter[0].slice(adapter[0].indexOf('=') + 1, adapter[0].indexOf(',')) + `,codexLbAdapterTarget=codexLbReadTarget(${adapterThread}),codexLbAdapterConfig=codexLbReadConfig(codexLbAdapterTarget,codexLbAdapterTarget.hostId),codexLbAdapterProvider=codexLbReadProvider(${adapterThread})??codexLbAdapterConfig.data?.model_provider,${adapter[2]}=codexLbBlocksWorkspaceUsage(codexLbAdapterProvider,${queryHook}(${quotaAtom})&&${adapter[3]}===\x60local\x60),` + adapter[0].slice(adapter[0].lastIndexOf(',') + 1);
+  patched = replaceOnce(patched, adapter[0], adapterAfter, 'composer adapter quota', changes);
+  return {
+    code: patched, changes, helpers: providerHelpers,
+    symbols: { targetAtom, configAtom, providerAtom, readHook, queryHook, quotaAtom, quotaName, bannerName, scopeAtom, scopeHook, resolver, adapterThread, adapterHost: adapter[3], adapterBlocked: adapter[2] },
+    fragments: { quota, banner, adapter: adapterAfter.slice(adapterAfter.indexOf(',') + 1, adapterAfter.lastIndexOf(',')) },
+  };
+}
+return { transform, helper };
+
+})();
+const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+function hashFile(file) {
+  const fd = fs.openSync(file, 'r'), chunk = Buffer.alloc(4194304), hash = crypto.createHash('sha256');
+  try { let bytes; while ((bytes = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) hash.update(chunk.subarray(0, bytes)); }
+  finally { fs.closeSync(fd); }
+  return hash.digest('hex');
+}
+function openArchive(file) {
+  const fd = fs.openSync(file, 'r'), prefix = Buffer.alloc(16);
+  assert.equal(fs.readSync(fd, prefix, 0, 16, 0), 16);
+  assert.equal(prefix.readUInt32LE(0), 4, 'Unsupported ASAR format');
+  const size = prefix.readUInt32LE(12);
+  assert(size > 0 && size < 64 * 1024 * 1024, 'Invalid ASAR header length');
+  const raw = Buffer.alloc(size);
+  assert.equal(fs.readSync(fd, raw, 0, size, 16), size);
+  const header = JSON.parse(raw.toString('utf8')), entries = new Map();
+  function collect(files, parent = '') {
+    for (const [name, entry] of Object.entries(files)) {
+      const key = parent + name;
+      if (entry.files) collect(entry.files, key + '/');
+      else entries.set(key, entry);
+    }
+  }
+  collect(header.files);
+  const start = 8 + prefix.readUInt32LE(4);
+  const read = key => {
+    const entry = entries.get(key);
+    assert(entry && entry.offset !== undefined && !entry.unpacked, `Missing packed asset: ${key}`);
+    const bytes = Buffer.alloc(entry.size);
+    assert.equal(fs.readSync(fd, bytes, 0, bytes.length, start + Number(entry.offset)), bytes.length);
+    return bytes;
+  };
+  return { fd, header, entries, start, raw, read };
+}
+function analyze(appDir) {
+  const archivePath = path.join(appDir, 'resources', 'app.asar');
+  const executable = path.join(appDir, 'ChatGPT.exe');
+  const archive = openArchive(archivePath);
+  try {
+    const assets = [...archive.entries.keys()].filter(key => /^webview\/assets\/app-primary-[^/]+\.js$/.test(key));
+    assert.equal(assets.length, 1, 'Expected one primary UI bundle; app layout changed');
+    const asset = assets[0], original = archive.read(asset);
+    const originalEntry = archive.entries.get(asset);
+    assert.equal(digest(original), originalEntry.integrity?.hash, 'Installed UI integrity mismatch');
+    const cache = new Map();
+    const transformed = transform(original.toString('utf8'), asset, key => {
+      if (!cache.has(key)) cache.set(key, archive.read(key).toString('utf8'));
+      return cache.get(key);
+    });
+    const syntax = spawnSync(process.execPath, ['--check', '--input-type=module'], { input: transformed.code, encoding: 'utf8', maxBuffer: 1024 * 1024 });
+    assert.equal(syntax.status, 0, 'Patched JavaScript syntax check failed: ' + syntax.stderr);
+    const originalHeaderHash = digest(archive.raw), binary = fs.readFileSync(executable);
+    const at = binary.indexOf(Buffer.from(originalHeaderHash));
+    assert(at >= 0 && binary.indexOf(Buffer.from(originalHeaderHash), at + 64) < 0, 'Cannot uniquely resolve embedded ASAR integrity hash');
+    return { archive, archivePath, executable, binary, hashOffset: at, originalHeaderHash, asset, transformed, originalAssetHash: digest(original) };
+  } catch (error) {
+    fs.closeSync(archive.fd);
+    throw error;
+  }
+}
+function verifyArchives(original, output, modifiedAsset, modifiedBytes) {
+  const changed = openArchive(output), a = Buffer.alloc(4194304), b = Buffer.alloc(a.length);
+  let count = 0;
+  try {
+    assert.equal(changed.entries.size, original.entries.size);
+    for (const [key, entry] of original.entries) {
+      const other = changed.entries.get(key);
+      assert(other, key);
+      if (entry.offset === undefined || entry.unpacked) { assert.deepEqual(other, entry); continue; }
+      if (key === modifiedAsset) {
+        const bytes = changed.read(key);
+        assert(bytes.equals(modifiedBytes));
+        assert.equal(digest(bytes), other.integrity.hash);
+        for (let offset = 0, index = 0; offset < bytes.length; offset += other.integrity.blockSize, index++) {
+          assert.equal(digest(bytes.subarray(offset, offset + other.integrity.blockSize)), other.integrity.blocks[index]);
+        }
+      } else {
+        const { offset: ignoreA, ...metaA } = entry, { offset: ignoreB, ...metaB } = other;
+        assert.deepEqual(metaA, metaB, key);
+        for (let offset = 0; offset < entry.size;) {
+          const size = Math.min(a.length, entry.size - offset);
+          assert.equal(fs.readSync(original.fd, a, 0, size, original.start + Number(entry.offset) + offset), size);
+          assert.equal(fs.readSync(changed.fd, b, 0, size, changed.start + Number(other.offset) + offset), size);
+          assert(a.subarray(0, size).equals(b.subarray(0, size)), 'Unexpected byte change: ' + key);
+          offset += size;
+        }
+      }
+      count++;
+    }
+  } finally { fs.closeSync(changed.fd); }
+  return count;
+}
+function build(appDir, outputDir) {
+  const originalPath = path.resolve(appDir), destinationPath = path.resolve(outputDir);
+  assert(destinationPath !== originalPath && !destinationPath.startsWith(originalPath + path.sep), 'Refusing to modify the installed application directory');
+  const plan = analyze(appDir), { archive } = plan;
+  try {
+    fs.mkdirSync(path.join(outputDir, 'resources'), { recursive: true });
+    const header = JSON.parse(JSON.stringify(archive.header)), packed = [];
+    function collect(files, parent = '') {
+      for (const [name, entry] of Object.entries(files)) {
+        const key = parent + name;
+        if (entry.files) collect(entry.files, key + '/');
+        else if (entry.offset !== undefined && !entry.unpacked) packed.push({ key, entry, original: archive.entries.get(key) });
+      }
+    }
+    collect(header.files);
+    packed.sort((a, b) => Number(a.original.offset) - Number(b.original.offset));
+    const modified = Buffer.from(plan.transformed.code), target = packed.find(item => item.key === plan.asset);
+    target.entry.size = modified.length;
+    const blockSize = target.entry.integrity.blockSize;
+    assert(blockSize > 0 && Number.isSafeInteger(blockSize));
+    target.entry.integrity = { algorithm: 'SHA256', hash: digest(modified), blockSize, blocks: [] };
+    for (let offset = 0; offset < modified.length; offset += blockSize) target.entry.integrity.blocks.push(digest(modified.subarray(offset, offset + blockSize)));
+    let offset = 0;
+    for (const item of packed) { item.entry.offset = String(offset); offset += item.entry.size; }
+    const rawHeader = Buffer.from(JSON.stringify(header)), padding = (4 - rawHeader.length % 4) % 4;
+    const headerPickle = Buffer.alloc(8 + rawHeader.length + padding), sizePickle = Buffer.alloc(8);
+    headerPickle.writeUInt32LE(headerPickle.length - 4, 0);
+    headerPickle.writeUInt32LE(rawHeader.length, 4);
+    rawHeader.copy(headerPickle, 8);
+    sizePickle.writeUInt32LE(4, 0); sizePickle.writeUInt32LE(headerPickle.length, 4);
+    const archiveOutput = path.join(outputDir, 'resources', 'app.asar'), temporary = archiveOutput + '.partial';
+    const out = fs.openSync(temporary, 'w'), chunk = Buffer.alloc(4194304);
+    try {
+      fs.writeSync(out, sizePickle); fs.writeSync(out, headerPickle);
+      for (const item of packed) {
+        if (item.key === plan.asset) { fs.writeSync(out, modified); continue; }
+        for (let offset = 0; offset < item.original.size;) {
+          const size = Math.min(chunk.length, item.original.size - offset);
+          assert.equal(fs.readSync(archive.fd, chunk, 0, size, archive.start + Number(item.original.offset) + offset), size);
+          fs.writeSync(out, chunk, 0, size); offset += size;
+        }
+      }
+    } finally { fs.closeSync(out); }
+    const verifiedPackedFiles = verifyArchives(archive, temporary, plan.asset, modified);
+    const newHeaderHash = digest(rawHeader), binary = Buffer.from(plan.binary);
+    Buffer.from(newHeaderHash).copy(binary, plan.hashOffset);
+    assert(binary.subarray(0, plan.hashOffset).equals(plan.binary.subarray(0, plan.hashOffset)));
+    assert(binary.subarray(plan.hashOffset + 64).equals(plan.binary.subarray(plan.hashOffset + 64)));
+    const executableOutput = path.join(outputDir, 'ChatGPT.exe');
+    fs.writeFileSync(executableOutput + '.partial', binary);
+    fs.renameSync(temporary, archiveOutput);
+    fs.renameSync(executableOutput + '.partial', executableOutput);
+    const manifest = {
+      patchFormat: 1, provider: 'codex-lb', builtAt: new Date().toISOString(), sourceApp: appDir,
+      asset: plan.asset, changes: plan.transformed.changes.map(change => change.name),
+      sourceHeaderSha256: plan.originalHeaderHash, patchedHeaderSha256: newHeaderHash,
+      sourceExecutableSha256: digest(plan.binary), patchedExecutableSha256: digest(binary),
+      sourceAssetSha256: plan.originalAssetHash, patchedAssetSha256: digest(modified),
+      patchedArchiveSha256: hashFile(archiveOutput),
+      sourceArchiveSize: fs.statSync(plan.archivePath).size, verifiedPackedFiles,
+      installedFilesModified: false, diagnosticsIncluded: false, executableSignature: 'modified copy is unsigned',
+    };
+    fs.writeFileSync(path.join(outputDir, 'patch-manifest.json'), JSON.stringify(manifest, null, 2));
+    return manifest;
+  } finally { fs.closeSync(archive.fd); }
+}
+function cached(appDir, outputDir) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'patch-manifest.json'), 'utf8'));
+  const source = openArchive(path.join(appDir, 'resources', 'app.asar'));
+  const output = openArchive(path.join(outputDir, 'resources', 'app.asar'));
+  try {
+    assert.equal(digest(source.raw), manifest.sourceHeaderSha256);
+    assert.equal(digest(output.raw), manifest.patchedHeaderSha256);
+    assert.equal(digest(fs.readFileSync(path.join(appDir, 'ChatGPT.exe'))), manifest.sourceExecutableSha256);
+    assert.equal(digest(fs.readFileSync(path.join(outputDir, 'ChatGPT.exe'))), manifest.patchedExecutableSha256);
+    assert.equal(digest(output.read(manifest.asset)), manifest.patchedAssetSha256);
+    assert.equal(hashFile(path.join(outputDir, 'resources', 'app.asar')), manifest.patchedArchiveSha256);
+    assert.equal(fs.statSync(path.join(appDir, 'resources', 'app.asar')).size, manifest.sourceArchiveSize);
+    return true;
+  } finally { fs.closeSync(source.fd); fs.closeSync(output.fd); }
+}
+if (true) {
+  try {
+    const [action, source, output] = process.argv.slice(2);
+    if (!source || !['check', 'build', 'cached'].includes(action)) throw new Error('Usage: node patch-asar.cjs check|build|cached SOURCE_APP [OUTPUT_APP]');
+    if (action === 'check') {
+      const plan = analyze(source);
+      try { console.log(JSON.stringify({ compatible: true, asset: plan.asset, changes: plan.transformed.changes.map(change => change.name), sourceHeaderSha256: plan.originalHeaderHash })); }
+      finally { fs.closeSync(plan.archive.fd); }
+    } else if (action === 'cached') { cached(source, output); console.log('Cached patch verified.'); }
+    else console.log(JSON.stringify(build(source, output), null, 2));
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
+}
+module.exports = { analyze, build, cached, openArchive };
+'@
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+function Set-CodexLauncherShortcut {
+    param($Package, [string]$Release, [string]$AppExe)
+    # The Store package's logo differs from the embedded executable icon.
+    $variant = 'unplated'
+    $theme = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction SilentlyContinue
+    if ($theme -and $theme.SystemUsesLightTheme -eq 1) { $variant = 'lightunplated' }
+    $assets = Join-Path $Package.InstallLocation 'assets'
+    $frames = @(foreach ($size in @(16, 20, 24, 32, 48, 64, 96, 256)) {
+        $png = Join-Path $assets ('Square44x44Logo.targetsize-' + $size + '_altform-' + $variant + '.png')
+        if (Test-Path -LiteralPath $png) {
+            [pscustomobject]@{ Size = $size; Bytes = [System.IO.File]::ReadAllBytes($png) }
+        }
+    })
+    $icon = $AppExe
+    if ($frames.Count) {
+        $icon = Join-Path $Release ('codex-' + $variant + '.ico')
+        $stream = [System.IO.MemoryStream]::new()
+        $writer = [System.IO.BinaryWriter]::new($stream)
+        try {
+            $writer.Write([uint16]0)
+            $writer.Write([uint16]1)
+            $writer.Write([uint16]$frames.Count)
+            $offset = 6 + 16 * $frames.Count
+            foreach ($frame in $frames) {
+                $dimension = if ($frame.Size -eq 256) { 0 } else { $frame.Size }
+                $writer.Write([byte]$dimension)
+                $writer.Write([byte]$dimension)
+                $writer.Write([byte]0)
+                $writer.Write([byte]0)
+                $writer.Write([uint16]1)
+                $writer.Write([uint16]32)
+                $writer.Write([uint32]$frame.Bytes.Length)
+                $writer.Write([uint32]$offset)
+                $offset += $frame.Bytes.Length
+            }
+            foreach ($frame in $frames) { $writer.Write([byte[]]$frame.Bytes) }
+            $writer.Flush()
+            $bytes = $stream.ToArray()
+            if (!(Test-Path -LiteralPath $icon) -or [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($icon)) -ne [Convert]::ToBase64String($bytes)) {
+                [System.IO.File]::WriteAllBytes($icon, $bytes)
+            }
+        } finally { $writer.Dispose(); $stream.Dispose() }
+    }
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex (codex-lb).lnk'))
+    $shortcut.TargetPath = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -ShowErrors -OutputRoot "' + $OutputRoot.TrimEnd('\') + '" -CodexHome "' + $CodexHome.TrimEnd('\') + '"'
+    $shortcut.WorkingDirectory = $PSScriptRoot
+    $shortcut.WindowStyle = 7
+    $shortcut.Description = 'Patch the current Codex installation and open your normal profile.'
+    $shortcut.IconLocation = $icon + ',0'
+    $shortcut.Save()
+}
+$launcherMutex = [System.Threading.Mutex]::new($false, 'Local\CodexLbLauncher')
+$launcherLockHeld = $false
+try {
+    try { $launcherLockHeld = $launcherMutex.WaitOne(0) }
+    catch [System.Threading.AbandonedMutexException] { $launcherLockHeld = $true }
+    if (!$launcherLockHeld) { Write-Host 'Another Codex-lb launcher is already running.'; exit 0 }
+    $node = (Get-Command node.exe -ErrorAction Stop).Source
+    $package = Get-AppxPackage -Name OpenAI.Codex | Sort-Object { [version]$_.Version } -Descending | Select-Object -First 1
+    if (!$package) { throw 'The Codex Store installation was not found.' }
+    $sourceApp = Join-Path $package.InstallLocation 'app'
+    Write-Host ('Installed Codex: ' + $package.Version)
+    if ($CheckOnly) {
+        $engineCode | & $node - check $sourceApp
+        if ($LASTEXITCODE -ne 0) { throw 'This app version needs an updated patch rule.' }
+        exit 0
+    }
+    $engineHash = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($engineCode))).Replace('-', '').ToLowerInvariant()
+    $ruleHash = $engineHash.Substring(0, 12)
+    $release = Join-Path $OutputRoot ($package.Version.ToString() + '-' + $ruleHash)
+    $runtime = Join-Path $release 'app'
+    $appExe = Join-Path $runtime 'ChatGPT.exe'
+    $ready = $false
+    if (Test-Path -LiteralPath (Join-Path $runtime 'patch-manifest.json')) {
+        $engineCode | & $node - cached $sourceApp $runtime
+        $ready = $LASTEXITCODE -eq 0
+    }
+    if (!$ready) {
+        # Check all structural anchors before copying or changing the staged build.
+        $engineCode | & $node - check $sourceApp
+        if ($LASTEXITCODE -ne 0) { throw 'This app version needs an updated patch rule; the installed app was left untouched.' }
+        $inUse = @(Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" | Where-Object { $_.ExecutablePath -eq $appExe })
+        if ($inUse.Count) { throw 'The staged build needs repair but is running. Quit it and run this launcher again.' }
+        New-Item -ItemType Directory -Path $runtime -Force | Out-Null
+        Write-Host 'Preparing a patched copy of the current installation...'
+        & robocopy.exe $sourceApp $runtime /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
+        if ($LASTEXITCODE -ge 8) { throw 'Copying the installed app failed.' }
+        $engineCode | & $node - build $sourceApp $runtime
+        if ($LASTEXITCODE -ne 0) { throw 'Patch verification failed. The staged app will not launch.' }
+        $engineCode | & $node - cached $sourceApp $runtime
+        if ($LASTEXITCODE -ne 0) { throw 'Final verification failed.' }
+    }
+    Set-Content -LiteralPath (Join-Path $OutputRoot 'latest-release.txt') -Value $runtime
+    try { Set-CodexLauncherShortcut -Package $package -Release $release -AppExe $appExe }
+    catch { Write-Warning ('Could not update the desktop shortcut: ' + $_.Exception.Message) }
+    if ($PrepareOnly) { Write-Host ('Ready: ' + $appExe); exit 0 }
+
+    $profile = Join-Path $env:LOCALAPPDATA ('Packages\' + $package.PackageFamilyName + '\LocalCache\Roaming\Codex\web\Codex')
+    if (!(Test-Path -LiteralPath $profile)) { $profile = Join-Path $env:APPDATA 'Codex\web\Codex' }
+    if (!(Test-Path -LiteralPath $profile)) { throw 'The normal Codex profile was not found.' }
+    $running = @(Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" | Where-Object { $_.CommandLine -notmatch '--type=' })
+    if ($running.Count -and $NoRestart) { throw 'Codex is running. Quit it first, or run without -NoRestart to switch instances.' }
+    if ($running.Count) {
+        Write-Host 'Restarting Codex to load the patched build...'
+        foreach ($app in $running) {
+            $process = Get-Process -Id $app.ProcessId -ErrorAction SilentlyContinue
+            if ($process -and $process.MainWindowHandle -ne 0) { $null = $process.CloseMainWindow() }
+        }
+        Start-Sleep -Seconds 2
+        # Closing a Codex window may leave its background process alive.
+        $ownedPaths = @($running | ForEach-Object { $_.ExecutablePath })
+        Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" | Where-Object { $_.ExecutablePath -in $ownedPaths } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Seconds 2
+    }
+    $remaining = @(Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" | Where-Object { $_.CommandLine -notmatch '--type=crashpad-handler' })
+    if ($remaining.Count) { throw 'A Codex instance is still running; refusing to share its profile.' }
+    $backup = Join-Path $release ('profile-state-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-Item -ItemType Directory -Path $backup -Force | Out-Null
+    foreach ($name in @('.codex-global-state.json', 'config.toml')) {
+        $file = Join-Path $CodexHome $name
+        if (Test-Path -LiteralPath $file) { Copy-Item -LiteralPath $file -Destination $backup }
+    }
+    $env:CODEX_HOME = $CodexHome
+    $process = Start-Process -FilePath $appExe -WorkingDirectory $runtime -ArgumentList ('--user-data-dir="' + $profile + '"') -PassThru
+    Write-Host ('Opened patched Codex, PID ' + $process.Id + ', with your normal profile.')
+    exit 0
+} catch {
+    $launcherErrorMessage = $_.Exception.Message
+    if ($ShowErrors) { try { $null = (New-Object -ComObject WScript.Shell).Popup($launcherErrorMessage, 0, 'Codex patch failed', 16) } catch {} }
+    Write-Error $launcherErrorMessage -ErrorAction Continue
+    exit 1
+} finally {
+    if ($launcherLockHeld) { $launcherMutex.ReleaseMutex() }
+    $launcherMutex.Dispose()
+}
