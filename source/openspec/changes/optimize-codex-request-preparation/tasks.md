@@ -2,7 +2,7 @@
 - [x] Read the service tier directly instead of dumping the request.
 - [x] Check fresh-replay safety before serializing a fallback body.
 - [x] Skip quota payload dumps for previous-response/conversation context.
-- [ ] Reuse the normalized body after stripping capability metadata.
+- [x] Reuse the normalized body after stripping capability metadata.
 - [ ] Copy only changed history nodes during oversized payload slimming.
 - [ ] Precompute compaction tool matches without changing pairing semantics.
 - [ ] Track exact compaction wire size incrementally.

@@ -3210,7 +3210,10 @@ class _WebSocketMixin:
         stripped_client_metadata = strip_capability_metadata(normalized_payload.get("client_metadata"))
         if stripped_client_metadata is not normalized_payload.get("client_metadata"):
             responses_payload = responses_payload.model_copy(update={"client_metadata": stripped_client_metadata})
-            normalized_payload = responses_payload.to_payload()
+            if stripped_client_metadata is None:
+                normalized_payload.pop("client_metadata", None)
+            else:
+                normalized_payload["client_metadata"] = stripped_client_metadata
         body_uses_responses_lite = _payload_uses_responses_lite(normalized_payload)
         trusted_incremental_responses_lite = bool(
             not body_uses_responses_lite
@@ -3392,7 +3395,9 @@ class _WebSocketMixin:
                     if isinstance(original_full_resend_payload, dict)
                     else original_full_resend_payload.input
                 )
-                if isinstance(original_full_resend_input, list) and _websocket_input_items_are_self_contained_fresh_replay(
+                if isinstance(
+                    original_full_resend_input, list
+                ) and _websocket_input_items_are_self_contained_fresh_replay(
                     cast(list[JsonValue], original_full_resend_input)
                 ):
                     request_state.fresh_upstream_request_text = _facade()._response_create_text_with_size_guard(
