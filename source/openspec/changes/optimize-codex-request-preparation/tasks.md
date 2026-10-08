@@ -10,8 +10,8 @@
 ## Verification and delivery
 - [x] Investigate premature stream closures and record whether a defect is confirmed.
 - [x] Preserve sanitized native receive-failure categories in operator logs without changing replay or public errors.
-- [ ] Pass relevant compatibility tests, lint, typing and OpenSpec checks.
-- [ ] Measure synthetic performance against the previous source.
-- [ ] Back up PostgreSQL and verify existing data mounts and identities.
+- [x] Pass relevant compatibility tests, lint, typing and OpenSpec checks, with the four confirmed baseline proxy-environment failures recorded in context.
+- [x] Measure synthetic performance against the previous source.
+- [x] Back up PostgreSQL and verify existing data mounts and identities.
 - [ ] Pin Compose in a separate deployment commit and push main.
 - [ ] Build, restart and verify the deployed revision and readiness.
