@@ -146,7 +146,9 @@ class DashboardService:
         )
         previous_window_start = bucket_since - timedelta(minutes=overview_timeframe.window_minutes)
         activity_aggregate = await self._repo.aggregate_activity_between(bucket_since, now)
-        throughput_rows = await self._repo.aggregate_throughput_between(bucket_since, now, overview_timeframe.bucket_seconds)
+        throughput_rows = await self._repo.aggregate_throughput_between(
+            bucket_since, now, overview_timeframe.bucket_seconds
+        )
         previous_activity_aggregate = await self._repo.aggregate_activity_between(previous_window_start, bucket_since)
         top_error = await self._repo.top_error_between(bucket_since, now)
         earliest_activity_at = await self._repo.earliest_activity_at()
@@ -239,20 +241,10 @@ class DashboardService:
             weekly_credit_pace=weekly_credit_pace,
         )
 
-    async def get_projections(self) -> DashboardProjectionsResponse:
+    async def get_projections(self, *, include_weekly_pace: bool = True) -> DashboardProjectionsResponse:
         now = utcnow()
-        accounts = await self._repo.list_accounts()
         primary_usage = await self._repo.latest_usage_by_account("primary")
         secondary_usage = await self._repo.latest_usage_by_account("secondary")
-        monthly_usage = await self._repo.latest_usage_by_account("monthly")
-        account_summaries = build_account_summaries(
-            accounts=accounts,
-            primary_usage=primary_usage,
-            secondary_usage=secondary_usage,
-            monthly_usage=monthly_usage,
-            encryptor=self._encryptor,
-            include_auth=False,
-        )
         dashboard_settings = await self._repo.get_settings()
         primary_history, secondary_history = await _load_projection_histories(
             self._repo,
@@ -262,6 +254,22 @@ class DashboardService:
             smoothing_window_minutes=dashboard_settings.weekly_pace_smoothing_minutes,
         )
         pri_depletion, sec_depletion = _build_depletion_by_window(primary_history, secondary_history, now)
+        if not include_weekly_pace:
+            return DashboardProjectionsResponse(
+                depletion_primary=pri_depletion,
+                depletion_secondary=sec_depletion,
+            )
+
+        accounts = await self._repo.list_accounts()
+        monthly_usage = await self._repo.latest_usage_by_account("monthly")
+        account_summaries = build_account_summaries(
+            accounts=accounts,
+            primary_usage=primary_usage,
+            secondary_usage=secondary_usage,
+            monthly_usage=monthly_usage,
+            encryptor=self._encryptor,
+            include_auth=False,
+        )
         trailing_demand = await self._repo.positive_used_percent_deltas_by_account(
             _weekly_history_windows(primary_usage, secondary_usage),
             since=now - DEMAND_WINDOW,

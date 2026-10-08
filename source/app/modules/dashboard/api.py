@@ -48,9 +48,10 @@ async def get_overview(
     dependencies=[Depends(require_dashboard_permission(Permission.ACCOUNTS_READ))],
 )
 async def get_projections(
+    include_weekly_pace: bool = Query(True),
     context: DashboardContext = Depends(get_dashboard_context),
 ) -> DashboardProjectionsResponse:
-    return await context.service.get_projections()
+    return await context.service.get_projections(include_weekly_pace=include_weekly_pace)
 
 
 @router.get("/models", dependencies=[Depends(require_dashboard_permission(Permission.DASHBOARD_READ))])

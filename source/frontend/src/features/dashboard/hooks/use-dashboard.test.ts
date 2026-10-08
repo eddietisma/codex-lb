@@ -97,6 +97,22 @@ describe("useDashboard", () => {
     expect(refetchInterval).toBe(5_000);
   });
 
+  it("requests depletion without repeating overview weekly pace", async () => {
+    let includeWeeklyPace: string | null = null;
+    server.use(
+      http.get("/api/dashboard/projections", ({ request }) => {
+        includeWeeklyPace = new URL(request.url).searchParams.get("include_weekly_pace");
+        return HttpResponse.json({ depletionPrimary: null, depletionSecondary: null, weeklyCreditPace: null });
+      }),
+    );
+    const queryClient = createTestQueryClient();
+    const { result } = renderHook(() => useDashboardProjections(), {
+      wrapper: createWrapper(queryClient),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(includeWeeklyPace).toBe("false");
+  });
+
   it("exposes error state on request failure", async () => {
     server.use(
       http.get("/api/dashboard/overview", () =>

@@ -62,7 +62,7 @@ export function getDashboardOverview(params: DashboardOverviewParams = {}) {
 }
 
 export function getDashboardProjections() {
-  return get(`${DASHBOARD_PATH}/projections`, DashboardProjectionsSchema);
+  return get(`${DASHBOARD_PATH}/projections?include_weekly_pace=false`, DashboardProjectionsSchema);
 }
 
 export function getRequestLogs(params: RequestLogsListFilters = {}) {

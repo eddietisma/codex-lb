@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -12,11 +13,51 @@ from app.db.models import Account, AccountStatus, ApiKey, RequestLog
 from app.db.session import SessionLocal
 from app.modules.accounts.repository import AccountsRepository
 from app.modules.accounts.schemas import AccountSummary
+from app.modules.dashboard.repository import DashboardRepository
 from app.modules.dashboard.weekly_pace import _weekly_timing
 from app.modules.request_logs.repository import RequestLogsRepository
 from app.modules.usage.repository import UsageRepository
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.asyncio
+async def test_dashboard_depletion_only_projections_preserve_values_without_weekly_reads(async_client, monkeypatch):
+    now = utcnow()
+    monkeypatch.setattr("app.modules.dashboard.service.utcnow", lambda: now)
+    async with SessionLocal() as session:
+        await AccountsRepository(session).upsert(_make_account("depletion", "depletion@example.invalid", "pro"))
+        repo = UsageRepository(session)
+        for window, minutes, days in (("primary", 300, 1), ("secondary", 10080, 4)):
+            for age, used in ((20, 20.0), (1, 25.0)):
+                await repo.add_entry(
+                    "depletion",
+                    used,
+                    window=window,
+                    window_minutes=minutes,
+                    reset_at=int(naive_utc_to_epoch(now + timedelta(days=days))),
+                    recorded_at=now - timedelta(minutes=age),
+                )
+
+    full = await async_client.get("/api/dashboard/projections")
+    assert full.status_code == 200
+    expected = full.json()
+    assert expected["weeklyCreditPace"] is not None
+    assert expected["depletionPrimary"] is not None
+    assert expected["depletionSecondary"] is not None
+
+    for method in ("list_accounts", "positive_used_percent_deltas_by_account", "top_api_key_attribution_since"):
+        monkeypatch.setattr(DashboardRepository, method, AsyncMock(side_effect=AssertionError("weekly-only read")))
+    original_latest = DashboardRepository.latest_usage_by_account
+
+    async def latest_without_monthly(self, window):
+        assert window != "monthly"
+        return await original_latest(self, window)
+
+    monkeypatch.setattr(DashboardRepository, "latest_usage_by_account", latest_without_monthly)
+    response = await async_client.get("/api/dashboard/projections?include_weekly_pace=false")
+    assert response.status_code == 200
+    assert response.json() == {**expected, "weeklyCreditPace": None}
 
 
 def _make_account(
