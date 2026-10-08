@@ -3210,6 +3210,7 @@ class _WebSocketMixin:
         stripped_client_metadata = strip_capability_metadata(normalized_payload.get("client_metadata"))
         if stripped_client_metadata is not normalized_payload.get("client_metadata"):
             responses_payload = responses_payload.model_copy(update={"client_metadata": stripped_client_metadata})
+            normalized_payload = dict(normalized_payload)
             if stripped_client_metadata is None:
                 normalized_payload.pop("client_metadata", None)
             else:
