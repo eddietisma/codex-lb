@@ -5,7 +5,7 @@
 - [x] Reuse the normalized body after stripping capability metadata.
 - [x] Copy only changed history nodes during oversized payload slimming.
 - [x] Precompute compaction tool matches without changing pairing semantics.
-- [ ] Track exact compaction wire size incrementally.
+- [x] Track exact compaction wire size incrementally.
 
 ## Verification and delivery
 - [x] Investigate premature stream closures and record whether a defect is confirmed.

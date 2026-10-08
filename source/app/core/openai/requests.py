@@ -1506,14 +1506,45 @@ def _compact_fit_selected_indices_to_wire_budget(
         key=optional_drop_key,
         reverse=True,
     )
+    if not optional_indices:
+        return selected
+
+    token_prefix = [0]
+    for token_count in token_counts:
+        token_prefix.append(token_prefix[-1] + token_count)
+
+    def marker_wire_chars(left: int, right: int) -> int:
+        omitted_items = right - left - 1
+        if not omitted_items:
+            return 0
+        marker = _compact_trim_marker(
+            omitted_items=omitted_items,
+            omitted_tokens=token_prefix[right] - token_prefix[left + 1],
+        )
+        return len(json.dumps(marker, ensure_ascii=True, sort_keys=True)) + 2
+
+    previous_selected = [-1] * len(input_value)
+    next_selected = [len(input_value)] * len(input_value)
+    item_wire_chars: dict[int, int] = {}
+    wire_chars = 0
+    previous = -1
+    for index in sorted(selected):
+        previous_selected[index] = previous
+        if previous >= 0:
+            next_selected[previous] = index
+        item_wire_chars[index] = len(json.dumps(input_value[index], ensure_ascii=True, sort_keys=True)) + 2
+        wire_chars += marker_wire_chars(previous, index) + item_wire_chars[index]
+        previous = index
+    wire_chars += marker_wire_chars(previous, len(input_value))
+    # Array brackets replace the final comma-space delimiter, so item contributions sum to the exact wire size.
+    wire_budget = _MAX_COMPACT_UPSTREAM_ESTIMATED_TOKENS * _ESTIMATED_CHARS_PER_TOKEN
     marker_budget = max(
         0,
         _MAX_COMPACT_UPSTREAM_ESTIMATED_TOKENS
         - _estimated_json_array_item_tokens(_compact_trim_marker(omitted_items=0, omitted_tokens=0)),
     )
     for index in optional_indices:
-        candidate_input = _compact_trimmed_input_with_markers(input_value, token_counts, selected)
-        if _estimated_json_tokens(candidate_input) <= _MAX_COMPACT_UPSTREAM_ESTIMATED_TOKENS:
+        if wire_chars <= wire_budget:
             break
         if index not in selected:
             continue
@@ -1528,6 +1559,19 @@ def _compact_fit_selected_indices_to_wire_budget(
             allow_pair_additions=False,
         )
         if required_indices <= trial and trial != selected:
+            for removed_index in selected - trial:
+                left = previous_selected[removed_index]
+                right = next_selected[removed_index]
+                wire_chars -= (
+                    item_wire_chars[removed_index]
+                    + marker_wire_chars(left, removed_index)
+                    + marker_wire_chars(removed_index, right)
+                )
+                wire_chars += marker_wire_chars(left, right)
+                if left >= 0:
+                    next_selected[left] = right
+                if right < len(input_value):
+                    previous_selected[right] = left
             selected = trial
     return selected
 

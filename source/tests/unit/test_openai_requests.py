@@ -4,6 +4,7 @@ import json
 import re
 from copy import deepcopy
 from typing import Mapping, cast
+from unittest.mock import patch
 
 import pytest
 from hypothesis import given, settings
@@ -17,7 +18,10 @@ from app.core.openai.requests import (
     _UNSUPPORTED_UPSTREAM_FIELDS,
     ResponsesCompactRequest,
     ResponsesRequest,
+    _compact_fit_selected_indices_to_wire_budget,
     _compact_reconciled_tool_call_indices,
+    _compact_trim_marker,
+    _compact_trimmed_input_with_markers,
     _estimated_json_array_item_tokens,
     _estimated_json_tokens,
     _input_image_file_reference,
@@ -2870,6 +2874,78 @@ def test_compact_state_anchor_matches_duplicate_call_id_by_occurrence():
     assert state_call in dumped_input
     assert state_output in dumped_input
     assert latest in dumped_input
+
+
+@given(
+    rows=st.lists(
+        st.tuples(
+            st.sampled_from(
+                [
+                    "message",
+                    "function_call",
+                    "function_call_output",
+                    "custom_tool_call",
+                    "custom_tool_call_output",
+                    "apply_patch_call",
+                    "apply_patch_call_output",
+                ]
+            ),
+            st.sampled_from(["a", "b"]),
+            st.sampled_from(["", "x" * 200, '한글 😀\\"\n' * 20]),
+            st.integers(min_value=0, max_value=9999),
+            st.booleans(),
+            st.booleans(),
+            st.booleans(),
+        ),
+        max_size=30,
+    ),
+    budget=st.integers(min_value=1, max_value=2000),
+)
+@settings(max_examples=300)
+def test_compact_incremental_wire_budget_matches_full_serialization(
+    rows: list[tuple[str, str, str, int, bool, bool, bool]], budget: int
+):
+    items: list[JsonValue] = [
+        {"type": item_type, "call_id": call_id, "content": text} for item_type, call_id, text, *_ in rows
+    ]
+    token_counts = [row[3] for row in rows]
+    selected = {index for index, row in enumerate(rows) if row[4]}
+    required = {index for index in selected if rows[index][5]}
+    priority = {index for index, row in enumerate(rows) if row[6]}
+    expected = set(selected)
+    optional = sorted(
+        selected - required,
+        key=lambda index: (0, 0, -index) if index in priority else (1, min(index, len(items) - 1 - index), index),
+        reverse=True,
+    )
+    marker_budget = max(
+        0, budget - _estimated_json_array_item_tokens(_compact_trim_marker(omitted_items=0, omitted_tokens=0))
+    )
+    for index in optional:
+        if _estimated_json_tokens(_compact_trimmed_input_with_markers(items, token_counts, expected)) <= budget:
+            break
+        if index not in expected:
+            continue
+        trial = _compact_reconciled_tool_call_indices(
+            items,
+            expected - {index},
+            token_counts=token_counts,
+            token_budget=marker_budget,
+            required_indices=required,
+            allow_pair_additions=False,
+        )
+        if required <= trial and trial != expected:
+            expected = trial
+
+    with patch("app.core.openai.requests._MAX_COMPACT_UPSTREAM_ESTIMATED_TOKENS", budget):
+        actual = _compact_fit_selected_indices_to_wire_budget(
+            items,
+            token_counts,
+            selected_indices=selected,
+            required_indices=required,
+            priority_indices=priority,
+        )
+    assert actual == expected
 
 
 def test_compact_backtracking_drops_optional_tool_pair_when_markers_exceed_budget():
