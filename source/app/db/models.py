@@ -2912,6 +2912,19 @@ Index(
     sqlite_where=text("deleted_at IS NULL"),
 )
 Index(
+    "idx_logs_throughput_covering",
+    RequestLog.requested_at,
+    postgresql_include=["account_id", "model", "reasoning_effort", "plan_type", "output_tokens", "latency_ms"],
+    postgresql_where=text(
+        "deleted_at IS NULL AND status = 'success' AND request_kind = 'normal' "
+        "AND output_tokens > 0 AND latency_ms > 0"
+    ),
+    sqlite_where=text(
+        "deleted_at IS NULL AND status = 'success' AND request_kind = 'normal' "
+        "AND output_tokens > 0 AND latency_ms > 0"
+    ),
+)
+Index(
     "idx_logs_requested_at_model_tier",
     RequestLog.requested_at.desc(),
     RequestLog.model,

@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import case, func, select, union_all
+from sqlalchemy import case, func, literal_column, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.plan_types import ACCOUNT_PLAN_ALIASES
@@ -196,10 +196,12 @@ class DashboardRepository:
                 RequestLog.requested_at >= since,
                 RequestLog.requested_at <= until,
                 RequestLog.deleted_at.is_(None),
-                RequestLog.status == "success",
-                RequestLog.request_kind == "normal",
-                RequestLog.output_tokens > 0,
-                RequestLog.latency_ms > 0,
+                # Fixed eligibility literals let PostgreSQL use the partial
+                # index even when a prepared statement switches to a generic plan.
+                RequestLog.status == literal_column("'success'"),
+                RequestLog.request_kind == literal_column("'normal'"),
+                RequestLog.output_tokens > literal_column("0"),
+                RequestLog.latency_ms > literal_column("0"),
             )
             .group_by(bucket_epoch, RequestLog.model, reasoning_effort, plan_type)
             .order_by(bucket_epoch, RequestLog.model, reasoning_effort.asc().nulls_first(), plan_type)

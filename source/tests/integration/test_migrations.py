@@ -1306,6 +1306,41 @@ async def test_usage_history_bulk_covering_indexes_migration_upgrade_and_downgra
 
 
 @pytest.mark.asyncio
+async def test_throughput_covering_index_migration_preserves_rows_on_upgrade_and_downgrade(tmp_path):
+    from alembic import command
+
+    from app.db.migrate import _build_alembic_config
+
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'throughput-covering.sqlite'}"
+    parent = "20260918_000000_merge_scim_and_overflow_heads"
+    revision = "20261008_000000_add_throughput_covering_index"
+    index_name = "idx_logs_throughput_covering"
+    await to_thread.run_sync(lambda: run_upgrade(db_url, parent, bootstrap_legacy=False))
+    engine = create_async_engine(db_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO request_logs (model, request_id, status, output_tokens, latency_ms) "
+                    "VALUES ('gpt-6.1-sol', 'historical-throughput', 'success', 100, 2000)"
+                )
+            )
+        for target in (revision, parent, revision):
+            if target == parent:
+                await to_thread.run_sync(lambda: command.downgrade(_build_alembic_config(db_url), target))
+            else:
+                await to_thread.run_sync(lambda: run_upgrade(db_url, target, bootstrap_legacy=False))
+            async with engine.connect() as conn:
+                indexes = {row[1] for row in await conn.execute(text("PRAGMA index_list('request_logs')"))}
+                assert (index_name in indexes) == (target == revision)
+                assert (await conn.execute(text("SELECT output_tokens, latency_ms FROM request_logs"))).all() == [
+                    (100, 2000)
+                ]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 @pytest.mark.skipif(
     not _is_postgresql_database_url(_DATABASE_URL),
     reason="PostgreSQL-only invalid covering-index repair test",
