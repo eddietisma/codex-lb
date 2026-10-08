@@ -4,7 +4,6 @@ import inspect
 import json
 import sys
 from collections.abc import Callable
-from copy import deepcopy
 from typing import Any, AsyncIterator, Literal, Mapping, cast
 
 from app.core.balancer import PERMANENT_FAILURE_CODES
@@ -957,7 +956,7 @@ def _slim_response_create_payload_for_upstream(
     if not isinstance(input_value, list) or not input_value:
         return payload, None
 
-    input_items = cast(list[JsonValue], deepcopy(input_value))
+    input_items = cast(list[JsonValue], input_value)
     preserve_from = _facade()._response_create_recent_suffix_start(input_items)
     historical = input_items[:preserve_from]
     recent = input_items[preserve_from:]
@@ -983,12 +982,11 @@ def _slim_response_create_payload_for_upstream(
         images_slimmed += item_images_slimmed
         slimmed_historical.append(slimmed_item)
 
-    candidate_payload = dict(payload)
-    candidate_payload["input"] = slimmed_historical + recent
-
     if tool_outputs_slimmed == 0 and images_slimmed == 0:
         return payload, None
 
+    candidate_payload = dict(payload)
+    candidate_payload["input"] = slimmed_historical + recent
     return candidate_payload, {
         "historical_tool_outputs_slimmed": tool_outputs_slimmed,
         "historical_images_slimmed": images_slimmed,

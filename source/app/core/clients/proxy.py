@@ -13,7 +13,6 @@ import re
 import socket
 import time
 from contextlib import asynccontextmanager
-from copy import deepcopy
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from enum import Enum
@@ -3186,7 +3185,7 @@ def _slim_response_create_payload_for_upstream(
     if not isinstance(input_value, list) or not input_value:
         return payload, None
 
-    input_items = cast(list[JsonValue], deepcopy(input_value))
+    input_items = cast(list[JsonValue], input_value)
     preserve_from = _response_create_recent_suffix_start(input_items)
     historical = input_items[:preserve_from]
     recent = input_items[preserve_from:]
@@ -3283,7 +3282,8 @@ def _slim_historical_response_input_item(
     if not is_json_mapping(item):
         return item, 0, 0
 
-    item_mapping = dict(cast(dict[str, JsonValue], deepcopy(item)))
+    # Unchanged nested values are borrowed; copy the item before replacing a field.
+    item_mapping = cast(dict[str, JsonValue], item)
     tool_outputs_slimmed = 0
     images_slimmed = 0
 
@@ -3301,6 +3301,7 @@ def _slim_historical_response_input_item(
         output = item_mapping.get("output")
         if isinstance(output, str):
             if _should_slim_historical_tool_output(output):
+                item_mapping = dict(item_mapping)
                 item_mapping["output"] = _RESPONSE_CREATE_TOOL_OUTPUT_OMISSION_NOTICE.format(
                     bytes=len(output.encode("utf-8"))
                 )
@@ -3308,12 +3309,15 @@ def _slim_historical_response_input_item(
         else:
             slimmed_output, output_images_slimmed = _slim_historical_response_content(output)
             if output_images_slimmed > 0:
+                item_mapping = dict(item_mapping)
                 item_mapping["output"] = slimmed_output
                 images_slimmed += output_images_slimmed
 
     content = item_mapping.get("content")
     slimmed_content, content_images_slimmed = _slim_historical_response_content(content)
     if content_images_slimmed > 0:
+        if item_mapping is item:
+            item_mapping = dict(item_mapping)
         item_mapping["content"] = slimmed_content
         images_slimmed += content_images_slimmed
 
@@ -3329,11 +3333,14 @@ def _slim_historical_response_content(content: JsonValue) -> tuple[JsonValue, in
     if not isinstance(content, list):
         return content, 0
 
-    slimmed_parts: list[JsonValue] = []
+    slimmed_parts = content
     images_slimmed = 0
-    for part in content:
+    for index, part in enumerate(content):
         slimmed_part, part_images_slimmed = _slim_historical_response_content_part(part)
-        slimmed_parts.append(slimmed_part)
+        if part_images_slimmed > 0:
+            if slimmed_parts is content:
+                slimmed_parts = list(content)
+            slimmed_parts[index] = slimmed_part
         images_slimmed += part_images_slimmed
     return slimmed_parts, images_slimmed
 
@@ -3342,7 +3349,7 @@ def _slim_historical_response_content_part(part: JsonValue) -> tuple[JsonValue, 
     if not is_json_mapping(part):
         return part, 0
 
-    part_mapping = dict(cast(dict[str, JsonValue], deepcopy(part)))
+    part_mapping = part
     part_type = part_mapping.get("type")
     if part_type == "input_image" and _is_inline_image_reference(part_mapping.get("image_url")):
         return _response_create_inline_image_notice_part(), 1

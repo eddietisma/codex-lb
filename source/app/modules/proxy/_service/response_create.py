@@ -6,7 +6,6 @@ import logging
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from copy import deepcopy
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -380,7 +379,7 @@ def _slim_response_create_payload_for_upstream(
     if not isinstance(input_value, list) or not input_value:
         return payload, None
 
-    input_items = cast(list[JsonValue], deepcopy(input_value))
+    input_items = cast(list[JsonValue], input_value)
     preserve_from = _response_create_recent_suffix_start(input_items)
     historical = input_items[:preserve_from]
     recent = input_items[preserve_from:]
@@ -406,12 +405,11 @@ def _slim_response_create_payload_for_upstream(
         images_slimmed += item_images_slimmed
         slimmed_historical.append(slimmed_item)
 
-    candidate_payload = dict(payload)
-    candidate_payload["input"] = slimmed_historical + recent
-
     if tool_outputs_slimmed == 0 and images_slimmed == 0:
         return payload, None
 
+    candidate_payload = dict(payload)
+    candidate_payload["input"] = slimmed_historical + recent
     return candidate_payload, {
         "historical_tool_outputs_slimmed": tool_outputs_slimmed,
         "historical_images_slimmed": images_slimmed,
@@ -509,7 +507,8 @@ def _slim_historical_response_input_item(
     if not is_json_mapping(item):
         return item, 0, 0
 
-    item_mapping = dict(cast(dict[str, JsonValue], deepcopy(item)))
+    # Unchanged nested values are borrowed; copy the item before replacing a field.
+    item_mapping = cast(dict[str, JsonValue], item)
     tool_outputs_slimmed = 0
     images_slimmed = 0
 
@@ -527,6 +526,7 @@ def _slim_historical_response_input_item(
         output = item_mapping.get("output")
         if isinstance(output, str):
             if _should_slim_historical_tool_output(output):
+                item_mapping = dict(item_mapping)
                 item_mapping["output"] = _RESPONSE_CREATE_TOOL_OUTPUT_OMISSION_NOTICE.format(
                     bytes=len(output.encode("utf-8"))
                 )
@@ -534,12 +534,15 @@ def _slim_historical_response_input_item(
         else:
             slimmed_output, output_images_slimmed = _slim_historical_response_content(output)
             if output_images_slimmed > 0:
+                item_mapping = dict(item_mapping)
                 item_mapping["output"] = slimmed_output
                 images_slimmed += output_images_slimmed
 
     content = item_mapping.get("content")
     slimmed_content, content_images_slimmed = _slim_historical_response_content(content)
     if content_images_slimmed > 0:
+        if item_mapping is item:
+            item_mapping = dict(item_mapping)
         item_mapping["content"] = slimmed_content
         images_slimmed += content_images_slimmed
 
