@@ -3385,28 +3385,24 @@ class _WebSocketMixin:
             request_state.proxy_injected_previous_response_id = True
             request_state.input_item_count = original_input_item_count or request_state.input_item_count
             request_state.input_full_fingerprint = original_input_fingerprint
+            request_state.fresh_upstream_request_text = None
             if original_full_resend_payload is not None:
-                request_state.fresh_upstream_request_text = _facade()._response_create_text_with_size_guard(
-                    original_full_resend_payload,
-                    include_type_field=True,
-                    client_metadata=client_metadata,
-                    request_state=request_state,
-                    transport=_REQUEST_TRANSPORT_WEBSOCKET,
-                )
                 original_full_resend_input = (
                     original_full_resend_payload.get("input")
                     if isinstance(original_full_resend_payload, dict)
                     else original_full_resend_payload.input
                 )
-            request_state.fresh_upstream_request_is_retry_safe = bool(
-                request_state.fresh_upstream_request_text is not None
-                and isinstance(original_full_resend_input, list)
-                and _websocket_input_items_are_self_contained_fresh_replay(
+                if isinstance(original_full_resend_input, list) and _websocket_input_items_are_self_contained_fresh_replay(
                     cast(list[JsonValue], original_full_resend_input)
-                )
-            )
-            if not request_state.fresh_upstream_request_is_retry_safe:
-                request_state.fresh_upstream_request_text = None
+                ):
+                    request_state.fresh_upstream_request_text = _facade()._response_create_text_with_size_guard(
+                        original_full_resend_payload,
+                        include_type_field=True,
+                        client_metadata=client_metadata,
+                        request_state=request_state,
+                        transport=_REQUEST_TRANSPORT_WEBSOCKET,
+                    )
+            request_state.fresh_upstream_request_is_retry_safe = request_state.fresh_upstream_request_text is not None
             request_state.fresh_upstream_request_responses_lite_model = (
                 responses_payload.model if body_uses_responses_lite else None
             )

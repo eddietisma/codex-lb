@@ -27079,6 +27079,11 @@ async def test_prepare_websocket_goal_restart_keeps_full_resend_without_injected
 async def test_prepare_websocket_response_create_request_does_not_fresh_retry_injected_tool_output_delta(
     monkeypatch,
 ):
+    monkeypatch.setattr(
+        proxy_service,
+        "_response_create_text_with_size_guard",
+        MagicMock(side_effect=AssertionError("Unsafe replay must not serialize a fallback body")),
+    )
     request_logs = _RequestLogsRecorder()
     service = proxy_service.ProxyService(_repo_factory(request_logs))
     reserve_usage = AsyncMock(return_value=None)

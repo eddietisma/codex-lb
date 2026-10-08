@@ -1,6 +1,6 @@
 ## Separate source commits
 - [x] Read the service tier directly instead of dumping the request.
-- [ ] Check fresh-replay safety before serializing a fallback body.
+- [x] Check fresh-replay safety before serializing a fallback body.
 - [ ] Skip quota payload dumps for previous-response/conversation context.
 - [ ] Reuse the normalized body after stripping capability metadata.
 - [ ] Copy only changed history nodes during oversized payload slimming.
