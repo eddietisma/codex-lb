@@ -9685,6 +9685,8 @@ async def test_stream_responses_derives_lite_http_header_from_additional_tools(m
 
 @pytest.mark.asyncio
 async def test_stream_responses_uses_websocket_transport_and_marks_lite_payload(monkeypatch):
+    dumps_spy = MagicMock(wraps=json.dumps)
+    monkeypatch.setattr(proxy_module.json, "dumps", dumps_spy)
     class Settings:
         upstream_base_url = "https://chatgpt.com/backend-api"
         upstream_connect_timeout_seconds = 8.0
@@ -9757,6 +9759,13 @@ async def test_stream_responses_uses_websocket_transport_and_marks_lite_payload(
     }
     expected_request_payload["parallel_tool_calls"] = False
     assert request_payload == expected_request_payload
+    create_serializations = [
+        call
+        for call in dumps_spy.call_args_list
+        if call.args and isinstance(call.args[0], dict) and call.args[0].get("type") == "response.create"
+    ]
+    assert len(create_serializations) == 1
+    assert len(websocket.sent) == 1
     assert "context" not in cast(Mapping[str, JsonValue], payload.to_payload()["reasoning"])
     upstream_headers = cast(dict[str, str], session.ws_calls[0]["headers"])
     assert proxy_module.CODEX_RESPONSES_LITE_HEADER not in {key.lower() for key in upstream_headers}
@@ -10923,8 +10932,8 @@ async def test_stream_responses_websocket_broken_pipe_is_not_replayable_upstream
     logged_completions: list[dict[str, object]] = []
 
     class _BrokenPipeWsResponse(_WsResponse):
-        async def send_json(self, payload: dict[str, object]) -> None:
-            self.sent_json.append(payload)
+        async def send_str(self, data: str) -> None:
+            self.sent_json.append(json.loads(data))
             raise BrokenPipeError(32, "Broken pipe")
 
     def fake_log_upstream_request_complete(**kwargs: object) -> None:

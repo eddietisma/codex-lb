@@ -2887,7 +2887,7 @@ async def _stream_responses_via_websocket(
     """Yield ``(sse_block, event_type)`` pairs from the upstream websocket."""
     websocket_url = _to_websocket_upstream_url(url)
     request_started_at = time.monotonic()
-    request_payload = _prepare_websocket_response_create_payload(
+    request_payload, payload_text = _prepare_websocket_response_create_payload(
         payload_dict,
         protected_agent_control_output_occurrences=protected_agent_control_output_occurrences,
     )
@@ -3004,6 +3004,7 @@ async def _stream_responses_via_websocket(
             raise
 
     try:
+        send_str = getattr(websocket, "send_str", None)
         send_json = getattr(websocket, "send_json", None)
         remaining_total_timeout = _remaining_total_timeout(
             effective_total_timeout,
@@ -3021,26 +3022,23 @@ async def _stream_responses_via_websocket(
             headers=headers,
             extra={"frame_type": "text"},
         )
-        if callable(send_json):
+        if callable(send_str):
+            send_result = send_str(payload_text)
+            if asyncio.iscoroutine(send_result):
+                await asyncio.wait_for(send_result, timeout=remaining_total_timeout)
+        elif callable(send_json):
             await asyncio.wait_for(
                 cast(Callable[[JsonObject], Awaitable[None]], send_json)(request_payload),
                 timeout=remaining_total_timeout,
             )
         elif route is not None:
-            payload_text = json.dumps(request_payload, ensure_ascii=True, separators=(",", ":"))
-            send_str = getattr(websocket, "send_str", None)
-            if callable(send_str):
-                send_result = send_str(payload_text)
-                if asyncio.iscoroutine(send_result):
-                    await asyncio.wait_for(send_result, timeout=remaining_total_timeout)
-            else:
-                send_bytes = getattr(websocket, "send_bytes")
-                send_result = send_bytes(payload_text.encode())
-                if asyncio.iscoroutine(send_result):
-                    await asyncio.wait_for(send_result, timeout=remaining_total_timeout)
+            send_bytes = getattr(websocket, "send_bytes")
+            send_result = send_bytes(payload_text.encode())
+            if asyncio.iscoroutine(send_result):
+                await asyncio.wait_for(send_result, timeout=remaining_total_timeout)
         else:
             await asyncio.wait_for(
-                websocket.send_str(json.dumps(request_payload, ensure_ascii=True, separators=(",", ":"))),
+                websocket.send_str(payload_text),
                 timeout=remaining_total_timeout,
             )
         remaining_total_timeout = _remaining_total_timeout(
@@ -3115,7 +3113,7 @@ def _prepare_websocket_response_create_payload(
     payload_dict: JsonObject,
     *,
     protected_agent_control_output_occurrences: Mapping[tuple[str, str], tuple[bool, ...]] | None = None,
-) -> JsonObject:
+) -> tuple[JsonObject, str]:
     request_payload = _build_websocket_response_create_payload(payload_dict)
     payload_text = json.dumps(request_payload, ensure_ascii=True, separators=(",", ":"))
     payload_size = len(payload_text.encode("utf-8"))
@@ -3151,7 +3149,7 @@ def _prepare_websocket_response_create_payload(
             previous_response_id if isinstance(previous_response_id, str) else None,
         )
     if payload_size <= _UPSTREAM_RESPONSE_CREATE_MAX_BYTES:
-        return request_payload
+        return request_payload, payload_text
     # 400, not 413: the Codex client surfaces 400 immediately as a non-retryable
     # invalid request, while 413 burns five full-payload retries and then pins the
     # session to HTTP transport.
