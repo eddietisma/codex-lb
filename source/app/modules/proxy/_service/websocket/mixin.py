@@ -3352,9 +3352,7 @@ class _WebSocketMixin:
         reservation = await proxy._reserve_websocket_api_key_usage(
             refreshed_api_key,
             request_model=responses_payload.model,
-            request_service_tier=_facade()._normalize_service_tier_value(
-                dict(responses_payload.to_payload()).get("service_tier")
-            ),
+            request_service_tier=_facade()._normalize_service_tier_value(responses_payload.service_tier),
             request_usage_budget=estimate_api_key_request_usage(responses_payload),
         )
         try:
