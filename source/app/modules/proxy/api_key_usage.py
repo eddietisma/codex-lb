@@ -50,6 +50,15 @@ def estimate_api_key_request_usage(
     """
 
     if upstream_payload is None:
+        opaque_context = (
+            payload.previous_response_id is not None or payload.conversation is not None
+            if isinstance(payload, ResponsesRequest)
+            else any(
+                (payload.model_extra or {}).get(field) is not None for field in ("previous_response_id", "conversation")
+            )
+        )
+        if opaque_context:
+            return ApiKeyRequestUsageBudget(input_tokens=None, output_tokens=None)
         upstream_payload = payload.to_payload()
     return ApiKeyRequestUsageBudget(
         input_tokens=_estimate_request_input_tokens(payload, upstream_payload),

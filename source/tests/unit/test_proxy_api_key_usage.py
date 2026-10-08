@@ -92,6 +92,7 @@ def test_estimate_api_key_request_usage_accepts_compact_request_shape() -> None:
 @pytest.mark.parametrize("opaque_field", ["previous_response_id", "conversation"])
 def test_estimate_api_key_request_usage_uses_conservative_input_for_compact_opaque_context(
     opaque_field: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = ResponsesCompactRequest.model_validate(
         {
@@ -102,13 +103,18 @@ def test_estimate_api_key_request_usage_uses_conservative_input_for_compact_opaq
         }
     )
 
+    monkeypatch.setattr(
+        ResponsesCompactRequest,
+        "to_payload",
+        lambda self: pytest.fail("Opaque context must not dump its payload"),
+    )
     budget = estimate_api_key_request_usage(payload)
 
     assert budget.input_tokens is None
     assert budget.output_tokens is None
 
 
-def test_estimate_api_key_request_usage_uses_conservative_input_for_previous_response() -> None:
+def test_estimate_api_key_request_usage_uses_conservative_input_for_previous_response(monkeypatch) -> None:
     payload = ResponsesRequest.model_validate(
         {
             "model": "gpt-5.5",
@@ -118,6 +124,11 @@ def test_estimate_api_key_request_usage_uses_conservative_input_for_previous_res
         }
     )
 
+    monkeypatch.setattr(
+        ResponsesRequest,
+        "to_payload",
+        lambda self: pytest.fail("Opaque context must not dump its payload"),
+    )
     budget = estimate_api_key_request_usage(payload)
 
     assert budget.input_tokens is None
@@ -241,7 +252,8 @@ def test_estimate_api_key_request_usage_shared_dump_matches_default_path(body: d
 
     assert shared_budget == default_budget
     assert shared_budget.input_tokens == _legacy_estimate_request_input_tokens(payload.input, upstream_payload)
-    assert calls["count"] == 1, "the shared-dump path must not re-dump the request"
+    expected_dumps = 0 if body.get("previous_response_id") is not None or body.get("conversation") is not None else 1
+    assert calls["count"] == expected_dumps, "opaque and shared-dump paths must not re-dump the request"
 
 
 @given(
