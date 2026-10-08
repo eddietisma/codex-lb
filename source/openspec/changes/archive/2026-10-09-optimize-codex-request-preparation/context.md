@@ -15,3 +15,7 @@ On the same Windows host and deterministic 8,000-pair history, reconciliation im
 For sparse selection with 4,000 history items and 1,000 selected, incremental wire fitting improved from 714.85 ms to 202.62 ms; with 16,000 history items and 1,000 selected, 1,942.35 ms to 1,109.71 ms. Pair reconciliation still scans the history after each removal, which limits that path's gain.
 
 On a synthetic 2.33 MB nested history, lazy-copy slimming improved from 34.872 ms to 1.155 ms; traced peak allocation dropped from 5,802,169 to 49,521 bytes. Original and optimized output values matched. Live first-token improvements have not been measured.
+
+# Deployment
+
+Deployed source revision 4e10b7fa7cd1dc3bd3c08826f12661979cbb9a08 as codex-lb:preparation-4e10b7fa using the existing Compose bind mounts. The application was recreated after pushing main; PostgreSQL was not recreated. The seven modified application-file hashes match the workspace, readiness returned ok, the dashboard returned HTTP 200, opaque-context quota smoke checks passed, and account/API-key identity digests were unchanged. A verified PostgreSQL custom-format backup is retained at E:\.tmp\codexlb-deploy-4e10b7fa\database.dump.

@@ -13,5 +13,5 @@
 - [x] Pass relevant compatibility tests, lint, typing and OpenSpec checks, with the four confirmed baseline proxy-environment failures recorded in context.
 - [x] Measure synthetic performance against the previous source.
 - [x] Back up PostgreSQL and verify existing data mounts and identities.
-- [ ] Pin Compose in a separate deployment commit and push main.
-- [ ] Build, restart and verify the deployed revision and readiness.
+- [x] Pin Compose in a separate deployment commit and push main.
+- [x] Build, restart and verify the deployed revision and readiness.
