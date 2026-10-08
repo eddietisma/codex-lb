@@ -4,7 +4,7 @@
 - [x] Skip quota payload dumps for previous-response/conversation context.
 - [x] Reuse the normalized body after stripping capability metadata.
 - [x] Copy only changed history nodes during oversized payload slimming.
-- [ ] Precompute compaction tool matches without changing pairing semantics.
+- [x] Precompute compaction tool matches without changing pairing semantics.
 - [ ] Track exact compaction wire size incrementally.
 
 ## Verification and delivery

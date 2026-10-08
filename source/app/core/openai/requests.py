@@ -1594,6 +1594,9 @@ def _compact_reconciled_tool_call_indices(
 ) -> set[int]:
     call_indices_by_key: dict[tuple[str, str], list[int]] = {}
     output_indices_by_key: dict[tuple[str, str], list[int]] = {}
+    unmatched_calls_by_key: dict[tuple[str, str], list[int]] = {}
+    matching_call_by_output: dict[int, int] = {}
+    matching_outputs_by_call: dict[int, list[int]] = {}
     for index, item in enumerate(input_value):
         if not is_json_mapping(item):
             continue
@@ -1602,11 +1605,21 @@ def _compact_reconciled_tool_call_indices(
             continue
         item_type = item.get("type")
         if isinstance(item_type, str) and item_type in _COMPACT_TOOL_CALL_ITEM_TYPES:
-            call_indices_by_key.setdefault((call_id, item_type), []).append(index)
+            pair_key = (call_id, item_type)
+            call_indices_by_key.setdefault(pair_key, []).append(index)
+            unmatched_calls_by_key.setdefault(pair_key, []).append(index)
         elif isinstance(item_type, str):
             matching_call_type = _COMPACT_TOOL_CALL_TYPE_BY_OUTPUT_TYPE.get(item_type)
             if matching_call_type is not None:
-                output_indices_by_key.setdefault((call_id, matching_call_type), []).append(index)
+                pair_key = (call_id, matching_call_type)
+                output_indices_by_key.setdefault(pair_key, []).append(index)
+                unmatched_calls = unmatched_calls_by_key.get(pair_key)
+                if unmatched_calls:
+                    matching_call_by_output[index] = unmatched_calls.pop()
+                call_indices = call_indices_by_key.get(pair_key)
+                if call_indices:
+                    # Calls use their first output before the next call, independently of the LIFO output pairing.
+                    matching_outputs_by_call.setdefault(call_indices[-1], [index])
 
     reconciled = set(selected_indices)
     protected_indices = required_indices or set()
@@ -1629,33 +1642,12 @@ def _compact_reconciled_tool_call_indices(
                 reconciled.remove(index)
                 selected_tokens -= token_counts[index]
 
-    def matching_call_index(call_indices: list[int], output_indices: list[int], output_index: int) -> int | None:
-        unmatched_calls: list[int] = []
-        call_index_set = set(call_indices)
-        output_index_set = set(output_indices)
-        for index in range(output_index):
-            if index in call_index_set:
-                unmatched_calls.append(index)
-            elif index in output_index_set and unmatched_calls:
-                unmatched_calls.pop()
-        return unmatched_calls[-1] if unmatched_calls else None
-
-    def matching_output_indices(call_indices: list[int], call_index: int, output_indices: list[int]) -> list[int]:
-        next_call_indices = [next_call_index for next_call_index in call_indices if next_call_index > call_index]
-        next_call_index = next_call_indices[0] if next_call_indices else None
-        return [
-            output_index
-            for output_index in output_indices
-            if output_index > call_index and (next_call_index is None or output_index < next_call_index)
-        ][:1]
-
     for pair_key, output_indices in output_indices_by_key.items():
         selected_outputs = [index for index in output_indices if index in reconciled]
         if not selected_outputs:
             continue
-        call_indices = call_indices_by_key.get(pair_key, [])
         for output_index in selected_outputs:
-            call_index = matching_call_index(call_indices, output_indices, output_index)
+            call_index = matching_call_by_output.get(output_index)
             if call_index is None:
                 remove_indices([output_index])
             elif not allow_pair_additions and call_index not in reconciled:
@@ -1663,11 +1655,10 @@ def _compact_reconciled_tool_call_indices(
             elif not add_indices([call_index]):
                 remove_indices([output_index])
     for pair_key, call_indices in call_indices_by_key.items():
-        output_indices = output_indices_by_key.get(pair_key, [])
         for call_index in call_indices:
             if call_index not in reconciled:
                 continue
-            matched_output_indices = matching_output_indices(call_indices, call_index, output_indices)
+            matched_output_indices = matching_outputs_by_call.get(call_index, [])
             if not matched_output_indices:
                 remove_indices([call_index])
                 continue

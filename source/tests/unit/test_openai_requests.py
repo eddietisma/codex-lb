@@ -17,6 +17,7 @@ from app.core.openai.requests import (
     _UNSUPPORTED_UPSTREAM_FIELDS,
     ResponsesCompactRequest,
     ResponsesRequest,
+    _compact_reconciled_tool_call_indices,
     _estimated_json_array_item_tokens,
     _estimated_json_tokens,
     _input_image_file_reference,
@@ -2106,6 +2107,69 @@ def _compact_call_item(item_type: str, call_id: str) -> dict[str, JsonValue]:
     else:
         raise AssertionError(f"unexpected compact call type: {item_type}")
     return item
+
+
+@pytest.mark.parametrize("call_type", ["function_call", "custom_tool_call", "apply_patch_call"])
+@pytest.mark.parametrize(
+    ("selected", "budget", "required", "allow_additions", "expected"),
+    [
+        ({0}, 10, set(), True, set()),
+        ({1}, 10, set(), True, set()),
+        ({2}, 10, set(), True, {2, 3}),
+        ({3}, 10, set(), True, {2, 3}),
+        ({4}, 10, set(), True, {4}),
+        ({5}, 10, set(), True, set()),
+        ({4}, 10, {1}, True, {1, 4}),
+        ({0}, 10, {0}, True, {0}),
+        ({4}, 1, set(), True, set()),
+        ({3}, 1, set(), True, set()),
+        ({2}, 10, set(), False, set()),
+        ({3}, 10, set(), False, set()),
+        ({2, 3}, 10, set(), False, {2, 3}),
+        ({1, 4}, 10, set(), False, {4}),
+        ({3, 4}, 3, set(), True, {2, 3}),
+        ({7}, 10, set(), True, {6, 7}),
+        (set(range(10)), 10, set(), True, {2, 3, 4, 6, 7, 8, 9}),
+    ],
+)
+def test_compact_reconciliation_preserves_duplicate_id_matching_and_selection_order(
+    call_type: str,
+    selected: set[int],
+    budget: int,
+    required: set[int],
+    allow_additions: bool,
+    expected: set[int],
+):
+    other_call_type = "custom_tool_call" if call_type == "function_call" else "function_call"
+    call_id = "reused"
+
+    def output(item_type: str) -> JsonValue:
+        return {"type": f"{item_type}_output", "call_id": call_id, "output": "done"}
+
+    items: list[JsonValue] = [
+        output(call_type),
+        _compact_call_item(call_type, call_id),
+        _compact_call_item(call_type, call_id),
+        output(call_type),
+        output(call_type),
+        output(call_type),
+        _compact_call_item(other_call_type, call_id),
+        output(other_call_type),
+        _compact_call_item(call_type, call_id),
+        output(call_type),
+    ]
+
+    assert (
+        _compact_reconciled_tool_call_indices(
+            items,
+            selected,
+            token_counts=[1] * len(items),
+            token_budget=budget,
+            required_indices=required,
+            allow_pair_additions=allow_additions,
+        )
+        == expected
+    )
 
 
 @pytest.mark.parametrize(
