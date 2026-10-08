@@ -28,6 +28,7 @@ import app.core.clients.http as http_module
 import app.core.clients.proxy_websocket as proxy_websocket_module
 from app.core.clients.codex import CodexTransportError, CodexWebSocketResult
 from app.core.clients.native_egress import (
+    NativeEgressProtocolError,
     NativeEgressTransportError,
     NativeEgressUnavailable,
     NativeWebSocketMessage,
@@ -327,6 +328,65 @@ async def test_native_direct_adapter_classifies_helper_pong_timeout() -> None:
 
     assert message.kind == "error"
     assert message.error_code == UPSTREAM_WEBSOCKET_LIVENESS_TIMEOUT_CODE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["transport", "protocol", "consumer_backpressure", "helper_exit"])
+async def test_native_receive_failure_logs_category_without_changing_relay_contract(
+    phase: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    class NativeConnection(_FakeNativeWebSocket):
+        async def receive(self) -> NativeWebSocketMessage:
+            raise NativeEgressTransportError("secret upstream details", failure_phase=phase)
+
+    message = await NativeUpstreamWebSocket(cast(Any, NativeConnection())).receive()
+
+    assert message.kind == "error"
+    assert message.error == "Upstream websocket receive failed"
+    assert message.close_code is None
+    assert message.error_code == (
+        proxy_websocket_module.PROCESS_NETWORK_UNAVAILABLE_CODE if phase == "helper_exit" else None
+    )
+    assert f"failure_phase={phase}" in caplog.text
+    assert "secret upstream details" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol_error", [False, True])
+async def test_native_receive_diagnostics_do_not_log_untrusted_error_fields(
+    protocol_error: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    class NativeConnection(_FakeNativeWebSocket):
+        async def receive(self) -> NativeWebSocketMessage:
+            if protocol_error:
+                raise NativeEgressProtocolError("secret upstream details")
+            raise NativeEgressTransportError("secret upstream details", failure_phase="secret\nphase")
+
+    message = await NativeUpstreamWebSocket(cast(Any, NativeConnection())).receive()
+
+    assert message.error == "Upstream websocket receive failed"
+    assert message.error_code is None
+    assert f"failure_phase={'protocol' if protocol_error else 'unknown'}" in caplog.text
+    assert "secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [1000, 1012])
+async def test_native_peer_close_preserves_code_without_receive_failure_log(
+    code: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    class NativeConnection(_FakeNativeWebSocket):
+        async def receive(self) -> NativeWebSocketMessage:
+            return NativeWebSocketMessage(kind="close", close_code=code, close_reason="peer close")
+
+    message = await NativeUpstreamWebSocket(cast(Any, NativeConnection())).receive()
+
+    assert message.kind == "close"
+    assert message.close_code == code
+    assert message.close_reason == "peer close"
+    assert message.error is None
+    assert message.error_code is None
+    assert "Native upstream websocket receive failed" not in caplog.text
 
 
 @pytest.mark.asyncio

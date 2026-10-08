@@ -441,6 +441,26 @@ class NativeUpstreamWebSocket:
         try:
             message = await self._websocket.receive()
         except NativeEgressError as exc:
+            phase = exc.failure_phase if isinstance(exc, NativeEgressTransportError) else "protocol"
+            if phase not in {
+                "connect",
+                "transport",
+                "protocol",
+                "liveness_timeout",
+                "consumer_backpressure",
+                "helper_exit",
+                "helper_read",
+                "helper_write",
+                "shutdown",
+                "cancelled",
+                "websocket_receive",
+                "websocket_send",
+                "websocket",
+                "setup",
+                "timeout",
+            }:
+                phase = "unknown"
+            logger.warning("Native upstream websocket receive failed failure_phase=%s", phase)
             error = _native_websocket_transport_error(exc, operation="receive")
             return UpstreamWebSocketMessage(
                 kind="error",

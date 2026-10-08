@@ -19,3 +19,15 @@ Request preparation optimizations SHALL preserve forwarded JSON values, API-key 
 #### Scenario: Long compaction history retains the same selection
 - **WHEN** compaction reconciles tool pairs and fits the wire budget
 - **THEN** optimized matching and size accounting select the same indices and omission markers as the previous algorithm
+
+### Requirement: Sanitized native receive diagnostics
+
+Native WebSocket receive failures SHALL log an allowlisted failure category without raw exception details. Unknown categories SHALL be logged as unknown. Logging SHALL NOT change peer close codes, public error envelopes, replay eligibility or account-health classification.
+
+#### Scenario: Native failure contains an unrecognized phase
+- **WHEN** a native receive exception has an unrecognized phase string
+- **THEN** the operator log records unknown without exposing the string
+
+#### Scenario: Peer sends a close frame
+- **WHEN** an upstream peer closes its socket
+- **THEN** the existing close code is preserved and no native receive-failure warning is emitted
