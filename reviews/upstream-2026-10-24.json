@@ -1,0 +1,893 @@
+{
+  "date": "2026-10-24",
+  "upstream": "https://github.com/Soju06/codex-lb",
+  "local_base": "7c209dd3",
+  "tested_source": "4660f197097e6d4160a6bcecafd9b9d5070900ff",
+  "open_pr_count": 164,
+  "bugfix_or_security_triage_count": 96,
+  "incorporated_pr_count": 16,
+  "local_followup": {
+    "reason": "Preserve configuration-update precedence when an API key enforces a model alias; unit and API regressions failed before the local correction",
+    "commit": "517a0849",
+    "pr": 2665
+  },
+  "validation": {
+    "linux_native_tests_passed": 379,
+    "postgres_cleanup_tests_passed": 14,
+    "strict_canonical_specs_passed": 68,
+    "status": "passed_with_recorded_test_environment_limitations",
+    "rust_workspace_tests_passed": 28,
+    "postgres_reset_release_tests_passed": 19,
+    "linux_changed_module_tests_passed": 4056,
+    "linux_changed_module_test_environment_failure": "The Linux test image lacks Git and repository metadata. The single affected source-scan test passed when rerun on the host.",
+    "postgres_affected_reset_credit_tests_passed": 242,
+    "windows_baseline_failures": "Four environment-proxy tests and one timer test also failed against the unchanged baseline. Linux focused transport checks passed.",
+    "host_git_source_scan_tests_passed": 1
+  },
+  "triage": [
+    {
+      "pr": 2667,
+      "title": "fix(proxy): classify controlled interruptions as cancelled",
+      "url": "https://github.com/Soju06/codex-lb/pull/2667",
+      "upstream_head": "2a92c5946f088a7b71fb284eae263a8cd254ddcc",
+      "disposition": "deferred",
+      "reason": "Controlled-interruption classification needs independent accounting validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2666,
+      "title": "fix(proxy): recover complete native HTTP tool resends",
+      "url": "https://github.com/Soju06/codex-lb/pull/2666",
+      "upstream_head": "aaa2384591add857e29e210918f7c8e05b7e1c24",
+      "disposition": "deferred",
+      "reason": "Broader native tool-resend recovery requires deeper replay-safety review",
+      "local_commit": null
+    },
+    {
+      "pr": 2665,
+      "title": "fix(proxy): use configuration_update reasoning effort",
+      "url": "https://github.com/Soju06/codex-lb/pull/2665",
+      "upstream_head": "d3564c3fd8fe42408eda67c475ca3b512eff9833",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "d6010912f09567193f57eef838ff922f260d894c"
+    },
+    {
+      "pr": 2657,
+      "title": "chore(deps): fix rustls-webpki, tokio, certifi, and aiohttp security advisories",
+      "url": "https://github.com/Soju06/codex-lb/pull/2657",
+      "upstream_head": "d9b9add17daf9d5573ccae2d7482e7b17a288205",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "0dba188321b1e707018bc12259c9e9cdfb3ea0ee"
+    },
+    {
+      "pr": 2654,
+      "title": "fix(api-keys): bound expired-limit sweep progress",
+      "url": "https://github.com/Soju06/codex-lb/pull/2654",
+      "upstream_head": "ccfdb70f6a1801474b449cf457ac40742927ec85",
+      "disposition": "deferred",
+      "reason": "SQLite timestamp sweep trigger does not apply to this PostgreSQL deployment",
+      "local_commit": null
+    },
+    {
+      "pr": 2643,
+      "title": "fix(accounts): honor proxy routes in probes and quota warmup",
+      "url": "https://github.com/Soju06/codex-lb/pull/2643",
+      "upstream_head": "2fe298ee2df59c6a2d817a881c6663d00d462da6",
+      "disposition": "deferred",
+      "reason": "Account-specific upstream proxy probes were not reproduced for this deployment",
+      "local_commit": null
+    },
+    {
+      "pr": 2642,
+      "title": "fix(oauth): follow account routes during targeted reauthentication",
+      "url": "https://github.com/Soju06/codex-lb/pull/2642",
+      "upstream_head": "c0939821dc8d437d9b407398a7c5e3530add5682",
+      "disposition": "deferred",
+      "reason": "Account-specific upstream proxy reauthentication was not reproduced for this deployment",
+      "local_commit": null
+    },
+    {
+      "pr": 2640,
+      "title": "fix(usage): lift the 429 cooldown after an upstream-confirmed reset credit",
+      "url": "https://github.com/Soju06/codex-lb/pull/2640",
+      "upstream_head": "46f6e954472fa3f3337a4c25bb036829d5f9cf2e",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "4660f197097e6d4160a6bcecafd9b9d5070900ff"
+    },
+    {
+      "pr": 2639,
+      "title": "fix(oauth): map auth-server transport failures to OAuthError",
+      "url": "https://github.com/Soju06/codex-lb/pull/2639",
+      "upstream_head": "c1ece6b053d1638aa7be84805014f0dc6bc6db66",
+      "disposition": "deferred",
+      "reason": "OAuth transport-error mapping needs a focused authentication failure reproduction",
+      "local_commit": null
+    },
+    {
+      "pr": 2638,
+      "title": "fix(accounts): recognize the promax plan with Pro-equivalent capacity",
+      "url": "https://github.com/Soju06/codex-lb/pull/2638",
+      "upstream_head": "77873ef3b109eac1c937d6e505209055974ef72b",
+      "disposition": "deferred",
+      "reason": "No promax accounts in the live account pool",
+      "local_commit": null
+    },
+    {
+      "pr": 2636,
+      "title": "fix(proxy): notify Codex clients when idle upstream context is lost",
+      "url": "https://github.com/Soju06/codex-lb/pull/2636",
+      "upstream_head": "fa9c673c9f712a3369948beca559a1f69b025ceb",
+      "disposition": "deferred",
+      "reason": "Idle context-loss reconnection needs focused client lifecycle validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2635,
+      "title": "fix(native): preserve bounded WebSocket bursts",
+      "url": "https://github.com/Soju06/codex-lb/pull/2635",
+      "upstream_head": "126d4cedd795880c11b0e232c3a02b4f74a0b97a",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "591da7630bd665a1ad7cfdea176b614793922e1b"
+    },
+    {
+      "pr": 2634,
+      "title": "fix(proxy): reject paused accounts on open WebSockets",
+      "url": "https://github.com/Soju06/codex-lb/pull/2634",
+      "upstream_head": "f7bf33633223af8ad3f8c3a3fce50f20febcccbb",
+      "disposition": "deferred",
+      "reason": "Pause enforcement on an existing socket needs focused lifecycle validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2633,
+      "title": "fix(health): authorize internal drain from raw socket peer",
+      "url": "https://github.com/Soju06/codex-lb/pull/2633",
+      "upstream_head": "e8f87ecf4eae6aa8e6e7dcc3a9202f629a228662",
+      "disposition": "deferred",
+      "reason": "Internal-drain raw-peer authorization requires a focused deployment trust review",
+      "local_commit": null
+    },
+    {
+      "pr": 2632,
+      "title": "fix(auth): bind trusted-header identity to raw socket peer",
+      "url": "https://github.com/Soju06/codex-lb/pull/2632",
+      "upstream_head": "4d126e42283155de7cd711c8a7066f48ed726a04",
+      "disposition": "deferred",
+      "reason": "Trusted-header identity changes require verification of active proxy trust configuration",
+      "local_commit": null
+    },
+    {
+      "pr": 2631,
+      "title": "fix(deploy): forward startup migration termination signals",
+      "url": "https://github.com/Soju06/codex-lb/pull/2631",
+      "upstream_head": "6650c71128ac299a90d70e887caadf867ad6c327",
+      "disposition": "deferred",
+      "reason": "Startup migration signal forwarding requires operator lifecycle tests",
+      "local_commit": null
+    },
+    {
+      "pr": 2630,
+      "title": "fix(shutdown): bound managed HTTP client close",
+      "url": "https://github.com/Soju06/codex-lb/pull/2630",
+      "upstream_head": "1fdd428c33a261a9d5950f5d22c0469cc02d4d94",
+      "disposition": "deferred",
+      "reason": "Shutdown deadline change requires operator lifecycle tests",
+      "local_commit": null
+    },
+    {
+      "pr": 2628,
+      "title": "fix(proxy): honor poisoned fallback keys before bridge anchor planning",
+      "url": "https://github.com/Soju06/codex-lb/pull/2628",
+      "upstream_head": "23d013478a950276e47472d77d6457a6fcd86ce2",
+      "disposition": "deferred",
+      "reason": "Poisoned fallback-anchor planning needs independent continuity tests",
+      "local_commit": null
+    },
+    {
+      "pr": 2627,
+      "title": "fix(proxy): recover owned HTTP sessions during transient backoff",
+      "url": "https://github.com/Soju06/codex-lb/pull/2627",
+      "upstream_head": "d53b271e0a96cd33de479b732c0a0a9162fdf6aa",
+      "disposition": "deferred",
+      "reason": "Backoff handling overlaps selected PR 2486; broader recovery patch not imported wholesale",
+      "local_commit": null
+    },
+    {
+      "pr": 2626,
+      "title": "fix(proxy): preserve quota reset evidence in retry health",
+      "url": "https://github.com/Soju06/codex-lb/pull/2626",
+      "upstream_head": "061be89b3e302461249da25c8b399372e2a0fc24",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "5d166af801b8a5e765b05035a13bd01d24c3f304"
+    },
+    {
+      "pr": 2625,
+      "title": "fix(api-keys): expire elapsed samples in the /v1/usage aggregate",
+      "url": "https://github.com/Soju06/codex-lb/pull/2625",
+      "upstream_head": "b49f0376eef368d2d42eb02414480ccc78318f4c",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "226b4fdaab6f342d0f91e55340b9e49ec694220d"
+    },
+    {
+      "pr": 2624,
+      "title": "fix(proxy): record the resolved upstream transport, not auto",
+      "url": "https://github.com/Soju06/codex-lb/pull/2624",
+      "upstream_head": "8b944902432d73bd4765aef23071d6004a981324",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2618,
+      "title": "fix(http-bridge): recover from draining owner rejection",
+      "url": "https://github.com/Soju06/codex-lb/pull/2618",
+      "upstream_head": "a8e10acf5954e43eeec70f1ce92bed1d3b7ef77d",
+      "disposition": "deferred",
+      "reason": "Multiple-replica owner drain recovery; deployment has one application replica",
+      "local_commit": null
+    },
+    {
+      "pr": 2617,
+      "title": "fix(proxy): allow prefix-settled replay outputs",
+      "url": "https://github.com/Soju06/codex-lb/pull/2617",
+      "upstream_head": "0c561ab30cf0a54decf62387779becb1757989d1",
+      "disposition": "deferred",
+      "reason": "Broader tool-output replay acceptance requires deeper replay-safety review",
+      "local_commit": null
+    },
+    {
+      "pr": 2616,
+      "title": "fix(proxy): release the account lease when a stream wrapper is closed early",
+      "url": "https://github.com/Soju06/codex-lb/pull/2616",
+      "upstream_head": "aa9e96e2b6e6d3bdd2bd8bf31905035700f5d79f",
+      "disposition": "already_equivalent",
+      "reason": "Equivalent correction verified in the existing local fix stack",
+      "local_commit": null
+    },
+    {
+      "pr": 2604,
+      "title": "fix(ui): keep password-manager suggestions clickable over dialogs",
+      "url": "https://github.com/Soju06/codex-lb/pull/2604",
+      "upstream_head": "73b41ea8680178ad5f41cfc2457949ced0eb0594",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2600,
+      "title": "fix(db): finalize SQLite cursors after cancelled writes",
+      "url": "https://github.com/Soju06/codex-lb/pull/2600",
+      "upstream_head": "ee851fb230326d64fbd8920d7bc2fe1b292471cb",
+      "disposition": "deferred",
+      "reason": "SQLite cursor finalization; deployment uses PostgreSQL",
+      "local_commit": null
+    },
+    {
+      "pr": 2593,
+      "title": "fix(images): allow GPT Image 2 transparent PNG and WebP",
+      "url": "https://github.com/Soju06/codex-lb/pull/2593",
+      "upstream_head": "b226b22fa3fd5b529a687fbadb42e99852d3ce6a",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2591,
+      "title": "fix(proxy): preserve required-owner WebSocket connect errors",
+      "url": "https://github.com/Soju06/codex-lb/pull/2591",
+      "upstream_head": "e7f9df37fca8866dc410dd5b88afa4bb9371f163",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "6c1a3c17f05f95b6362da7ad2adcc81680b44740"
+    },
+    {
+      "pr": 2589,
+      "title": "fix(proxy): recognize CCodex native fingerprints",
+      "url": "https://github.com/Soju06/codex-lb/pull/2589",
+      "upstream_head": "c22607d0f11e74aa871ae518e08e8f6404237bc0",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "3dae76ed96f63dfb9fb8c310308234ec63785241"
+    },
+    {
+      "pr": 2583,
+      "title": "fix(proxy): retire a policy-excluded continuity owner that cannot return in time",
+      "url": "https://github.com/Soju06/codex-lb/pull/2583",
+      "upstream_head": "3d34b86141a26faf4f209b72478c93d16c048859",
+      "disposition": "deferred",
+      "reason": "Owner-retirement policy needs separate continuity validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2581,
+      "title": "fix(proxy): preserve agent context across HTTP bridge reconnects",
+      "url": "https://github.com/Soju06/codex-lb/pull/2581",
+      "upstream_head": "d83dac5b4fc1159a19fd539bc635e3425eecee9a",
+      "disposition": "deferred",
+      "reason": "Additional agent-context replay proof needs independent ownership regressions",
+      "local_commit": null
+    },
+    {
+      "pr": 2579,
+      "title": "fix(proxy): fence HTTP bridge writes by dispatch generation",
+      "url": "https://github.com/Soju06/codex-lb/pull/2579",
+      "upstream_head": "86962505174249ddf66f7fc0b3884adcef31e549",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2576,
+      "title": "fix(api-keys): expose supported image models in key picker",
+      "url": "https://github.com/Soju06/codex-lb/pull/2576",
+      "upstream_head": "fba0da53584762aa7c9c933612edf89f95df84c7",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2575,
+      "title": "fix(proxy): keep the prewarm anchor on websocket replay",
+      "url": "https://github.com/Soju06/codex-lb/pull/2575",
+      "upstream_head": "8f5c17025d41aac2ce4a2fa412a050af80589dc3",
+      "disposition": "already_equivalent",
+      "reason": "Equivalent correction verified in the existing local fix stack",
+      "local_commit": null
+    },
+    {
+      "pr": 2569,
+      "title": "fix(proxy): keep developer input messages in input",
+      "url": "https://github.com/Soju06/codex-lb/pull/2569",
+      "upstream_head": "778e10f4ab7111c7ab5539b448df2763fabc1987",
+      "disposition": "already_equivalent",
+      "reason": "Equivalent correction verified in the existing local fix stack",
+      "local_commit": null
+    },
+    {
+      "pr": 2561,
+      "title": "fix(proxy): honor dashboard caps on warm bridge admission",
+      "url": "https://github.com/Soju06/codex-lb/pull/2561",
+      "upstream_head": "6c4ed618d3ca1c3ec2e715bea8d5787398a4ce31",
+      "disposition": "deferred",
+      "reason": "Warm-bridge admission behavior needs separate concurrency validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2558,
+      "title": "fix(balancer): express lease pressure in percentage points and keep relative availability ranked by persisted usage",
+      "url": "https://github.com/Soju06/codex-lb/pull/2558",
+      "upstream_head": "611ffaf315e3a55bdaf075565dbeac62c1b2775e",
+      "disposition": "deferred",
+      "reason": "Routing score units need separate validation across the whole account selection policy",
+      "local_commit": null
+    },
+    {
+      "pr": 2555,
+      "title": "fix(http-bridge): leave the terminal append running at its bound",
+      "url": "https://github.com/Soju06/codex-lb/pull/2555",
+      "upstream_head": "f3c511eacd113670cb8951a53d9d84982675fb6c",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2550,
+      "title": "fix(logging): redact non-Basic authorization values to end of line",
+      "url": "https://github.com/Soju06/codex-lb/pull/2550",
+      "upstream_head": "6f2ebf4fe29fdb85e0653e903f85f7a0cb5df118",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "f67df3b49745c034035360a711fd2014ae88984e"
+    },
+    {
+      "pr": 2548,
+      "title": "fix(auth): honor configured admin session lifetime",
+      "url": "https://github.com/Soju06/codex-lb/pull/2548",
+      "upstream_head": "c3cfb4444d7cda5e98a561a78d3232adff480a2b",
+      "disposition": "deferred",
+      "reason": "Changes the existing remote-admin session lifetime policy",
+      "local_commit": null
+    },
+    {
+      "pr": 2547,
+      "title": "fix(usage): account for Astra ultrafast token pricing",
+      "url": "https://github.com/Soju06/codex-lb/pull/2547",
+      "upstream_head": "21f8b25aea872970d986266f98f29d22900bc1dc",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2539,
+      "title": "fix(proxy): treat websocket close 1009 as terminal payload_too_large",
+      "url": "https://github.com/Soju06/codex-lb/pull/2539",
+      "upstream_head": "63b5313db2ee2fc2dee8a0ed92bf4e8c8b7f0258",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "817e55453ae2987572987571aab37bfc309313c0"
+    },
+    {
+      "pr": 2537,
+      "title": "fix(images): route image requests through compatible host",
+      "url": "https://github.com/Soju06/codex-lb/pull/2537",
+      "upstream_head": "fe60885852e4c50a2c2890c44cc1b14879310632",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2531,
+      "title": "fix(proxy): normalize parallel_tool_calls for Responses-Lite upstream",
+      "url": "https://github.com/Soju06/codex-lb/pull/2531",
+      "upstream_head": "2f8fe38f23030ed3b9a7869f6bc94b8157e53f05",
+      "disposition": "already_equivalent",
+      "reason": "Equivalent correction verified in the existing local fix stack",
+      "local_commit": null
+    },
+    {
+      "pr": 2530,
+      "title": "fix(http-bridge): parse multiline websocket JSON messages",
+      "url": "https://github.com/Soju06/codex-lb/pull/2530",
+      "upstream_head": "047550259124a9fa0a785475626759d43ee67578",
+      "disposition": "already_equivalent",
+      "reason": "Equivalent correction verified in the existing local fix stack",
+      "local_commit": null
+    },
+    {
+      "pr": 2529,
+      "title": "fix(metrics): stop the metrics server from reconfiguring process logging",
+      "url": "https://github.com/Soju06/codex-lb/pull/2529",
+      "upstream_head": "6a88ed96a24b8517f2a99d5202dce2699771fe50",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "2ac2c9c117cd59a93da5b2e197dcd7730407bc16"
+    },
+    {
+      "pr": 2526,
+      "title": "fix(model-sources): preserve declared collaboration namespaces",
+      "url": "https://github.com/Soju06/codex-lb/pull/2526",
+      "upstream_head": "94104a4a7c2d7984f504b211ce2165490416bf91",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2523,
+      "title": "fix(metrics): publish fresh account pool gauges on scrape",
+      "url": "https://github.com/Soju06/codex-lb/pull/2523",
+      "upstream_head": "6ce4f6ea01460f2051ba6c907cd67363caa4588d",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2521,
+      "title": "fix(model-sources): validate optional usage and preserve streamed telemetry",
+      "url": "https://github.com/Soju06/codex-lb/pull/2521",
+      "upstream_head": "17e5d93af0866f0e508b513aae7251a99e71d901",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2519,
+      "title": "fix(http-bridge): parse multi-line upstream websocket frames",
+      "url": "https://github.com/Soju06/codex-lb/pull/2519",
+      "upstream_head": "27c3b80bc15551ad06f330b98da16da81c0d584d",
+      "disposition": "already_equivalent",
+      "reason": "Equivalent correction verified in the existing local fix stack",
+      "local_commit": null
+    },
+    {
+      "pr": 2515,
+      "title": "fix(chat): keep the JSON instruction in input for json_object requests",
+      "url": "https://github.com/Soju06/codex-lb/pull/2515",
+      "upstream_head": "7745342450cc0fc85dd1d7ce4cf3fbdd357c6b31",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2512,
+      "title": "fix(accounts): normalize business prolite plan alias",
+      "url": "https://github.com/Soju06/codex-lb/pull/2512",
+      "upstream_head": "d199fa38cd71fce5863c0cfd532e642ce24ad30c",
+      "disposition": "already_equivalent",
+      "reason": "Equivalent correction verified in the existing local fix stack",
+      "local_commit": null
+    },
+    {
+      "pr": 2508,
+      "title": "fix(proxy): reuse bridge sessions for inline images",
+      "url": "https://github.com/Soju06/codex-lb/pull/2508",
+      "upstream_head": "77bdd6434d6148f4c337e18bcfdfc1e4f3dafae3",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2506,
+      "title": "fix(shutdown): let DB-owning background tasks finish before cancelling them",
+      "url": "https://github.com/Soju06/codex-lb/pull/2506",
+      "upstream_head": "c0227592f22f36f99535a4c6717e2d77bb7847d3",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2504,
+      "title": "fix(usage): account for cache-write tokens",
+      "url": "https://github.com/Soju06/codex-lb/pull/2504",
+      "upstream_head": "439e715ac918ee5fe9f22f60b7ab9e26120695a9",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2503,
+      "title": "fix(http-bridge): keep replayed history images on the bridge",
+      "url": "https://github.com/Soju06/codex-lb/pull/2503",
+      "upstream_head": "a4e28a0ae37015c755932b1a900531b349aa2ea6",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2488,
+      "title": "fix(proxy): handle CRLF and malformed UTF-8 in owner forwarding",
+      "url": "https://github.com/Soju06/codex-lb/pull/2488",
+      "upstream_head": "a31ef4a77b47fea60a1634e64bfd2902c397b810",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2487,
+      "title": "fix(auth): reject non-ASCII TOTP digits safely",
+      "url": "https://github.com/Soju06/codex-lb/pull/2487",
+      "upstream_head": "175d8c3a179f4d7518d12f6efc24676254b1aa40",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "7901490cdcb74a4ebd3eb4dd17a3c56fec878356"
+    },
+    {
+      "pr": 2486,
+      "title": "fix(balancer): admit a hard continuity owner serving its own transient backoff",
+      "url": "https://github.com/Soju06/codex-lb/pull/2486",
+      "upstream_head": "bfc2efa2a5fc8cff63dc3bbc463a9e26a03c5dc3",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "bcf175ab211a803b0dc09a82aeb1618f2bf13207"
+    },
+    {
+      "pr": 2472,
+      "title": "fix(proxy): surface native transport give-up terminals",
+      "url": "https://github.com/Soju06/codex-lb/pull/2472",
+      "upstream_head": "bfffc82d40f1b60b6c165e53278226004736de1a",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2458,
+      "title": "fix(proxy): release a bridge-bypassed turn-state owner on quota evidence",
+      "url": "https://github.com/Soju06/codex-lb/pull/2458",
+      "upstream_head": "d66ce311874e51695ea5cbb918e111aad53f4dc2",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2457,
+      "title": "fix(proxy): classify Windows route errors 1231/1232 as host network loss",
+      "url": "https://github.com/Soju06/codex-lb/pull/2457",
+      "upstream_head": "916ff679ae743cf31e224d413d7e81fe1d845c35",
+      "disposition": "deferred",
+      "reason": "Windows host-route classification; application runs in a Linux container",
+      "local_commit": null
+    },
+    {
+      "pr": 2451,
+      "title": "fix(proxy): refuse remote compaction for model-source models before account selection",
+      "url": "https://github.com/Soju06/codex-lb/pull/2451",
+      "upstream_head": "de403727023b776d2088a9e4794324ecd78bbec1",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2444,
+      "title": "fix(metrics): separate observed generation timing from request latency",
+      "url": "https://github.com/Soju06/codex-lb/pull/2444",
+      "upstream_head": "f3ae14dc744b0226d0cb4243041fefad7c92a91a",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2439,
+      "title": "fix(proxy): preserve upstream quota reset metadata on terminal errors",
+      "url": "https://github.com/Soju06/codex-lb/pull/2439",
+      "upstream_head": "ae1e31edf8a5968010056e51a44d64ba4babb685",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2423,
+      "title": "fix(proxy): reject a dead client anchor instead of asking for a retry",
+      "url": "https://github.com/Soju06/codex-lb/pull/2423",
+      "upstream_head": "fbeba5bf3c2348bd19eeea07b1676e5a61d5f27a",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2398,
+      "title": "fix(proxy): prepare portable WebSocket full resends for quota replay",
+      "url": "https://github.com/Soju06/codex-lb/pull/2398",
+      "upstream_head": "4d3b29dbfa888d0e3d4488927ee97532d6923d43",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2377,
+      "title": "fix(dashboard): calm the telemetry consent dialog",
+      "url": "https://github.com/Soju06/codex-lb/pull/2377",
+      "upstream_head": "b4d3d39115c4d1e36334bc4f2a158b7d75e58c8a",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2345,
+      "title": "fix(proxy): preserve local quarantine evidence during completion",
+      "url": "https://github.com/Soju06/codex-lb/pull/2345",
+      "upstream_head": "aa409607e89b8e29d718d2feb5e950addcb85678",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2332,
+      "title": "fix(proxy): fail over account-local model rejection",
+      "url": "https://github.com/Soju06/codex-lb/pull/2332",
+      "upstream_head": "e0b33e9ea12a23643f24bbf25f3cdf34003d260f",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2326,
+      "title": "fix(warmup): preserve live reset evidence across skipped polls",
+      "url": "https://github.com/Soju06/codex-lb/pull/2326",
+      "upstream_head": "40a867bf51390cccdd1f4be1101c652d3ebb8dc1",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2321,
+      "title": "fix(accounts): preserve observed monthly quota across plans",
+      "url": "https://github.com/Soju06/codex-lb/pull/2321",
+      "upstream_head": "1ea88895c09b35db186c78d18eacabc5623efde4",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2319,
+      "title": "fix(proxy): contain post-terminal health write failures",
+      "url": "https://github.com/Soju06/codex-lb/pull/2319",
+      "upstream_head": "26cfb9e8b18b3391a78c46877fe7e6be85f25aed",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "5ff4aa7415b424ef4e6fc946644b0d8b5a16256a"
+    },
+    {
+      "pr": 2317,
+      "title": "fix(proxy): align compact budget with responses stream",
+      "url": "https://github.com/Soju06/codex-lb/pull/2317",
+      "upstream_head": "25886e2d407e6319a15e9eef60d1e9c3154b70c3",
+      "disposition": "deferred",
+      "reason": "Changes compact and automation timeout defaults; no local timeout reproduction",
+      "local_commit": null
+    },
+    {
+      "pr": 2280,
+      "title": "fix(proxy): preserve newer retry state during scheduled cleanup",
+      "url": "https://github.com/Soju06/codex-lb/pull/2280",
+      "upstream_head": "17e1dce17a71203596f21ef38f7347a1ec373182",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "3ec004b3dbcf3eb82d940adbcabb7459f6c8662c"
+    },
+    {
+      "pr": 2278,
+      "title": "fix(proxy): count incomplete responses toward bridge retries",
+      "url": "https://github.com/Soju06/codex-lb/pull/2278",
+      "upstream_head": "93d12ba97983e5d6a80d4c72b152c53021fb9727",
+      "disposition": "incorporated",
+      "reason": "Verified applicable to local code; imported as a separate commit with regression coverage",
+      "local_commit": "0b7e0203c56926fd364f56df82b09ba021cf1a74"
+    },
+    {
+      "pr": 2277,
+      "title": "fix(proxy): preserve continuation anchors during input normalization",
+      "url": "https://github.com/Soju06/codex-lb/pull/2277",
+      "upstream_head": "072e748a80f12f36a972c9ff7cee22b9f0ea3455",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2276,
+      "title": "fix(proxy): preserve newer quarantine during response cleanup",
+      "url": "https://github.com/Soju06/codex-lb/pull/2276",
+      "upstream_head": "dcd02d405cc3202bf0319c15e01a0c2cce88a442",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2133,
+      "title": "fix(proxy): isolate bridge heartbeat from maintenance",
+      "url": "https://github.com/Soju06/codex-lb/pull/2133",
+      "upstream_head": "2c2b63c4d8f47cc920c0f67f52e59c7199a8b29b",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2122,
+      "title": "fix(warmup): restore reset usage threshold",
+      "url": "https://github.com/Soju06/codex-lb/pull/2122",
+      "upstream_head": "23fb44a070ce0b080ff92a5bd7d90873fd31bbae",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2121,
+      "title": "fix(proxy): recover tool-complete goal followups from unavailable owners",
+      "url": "https://github.com/Soju06/codex-lb/pull/2121",
+      "upstream_head": "73312940343fddb2e9e91bb8c5665cb0fb79de6a",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2120,
+      "title": "fix(auth): retain unexpired access on refresh preflight failure",
+      "url": "https://github.com/Soju06/codex-lb/pull/2120",
+      "upstream_head": "3e39a6c972fff12ecd1a288748b79248c1d82c7c",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2117,
+      "title": "fix(proxy): retire revoked stream accounts",
+      "url": "https://github.com/Soju06/codex-lb/pull/2117",
+      "upstream_head": "373f73de0641fe34107720c2f1bbd0207a94b074",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2112,
+      "title": "fix(observability): record HTTP upstream phase timings",
+      "url": "https://github.com/Soju06/codex-lb/pull/2112",
+      "upstream_head": "5b2b548e9b8ab89b80789ca5b27ad527353e3b04",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2101,
+      "title": "fix(proxy): add native history and notes routes with account-local ownership",
+      "url": "https://github.com/Soju06/codex-lb/pull/2101",
+      "upstream_head": "add944a0abf4b82a75bc27102ce4fa3ea07b33f3",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2098,
+      "title": "fix(docker): isolate host OAuth callback port by default",
+      "url": "https://github.com/Soju06/codex-lb/pull/2098",
+      "upstream_head": "571b6afede4a43625b9c2bdab221927f80e1031b",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2088,
+      "title": "fix(http-bridge): wait for aborted bridge owner before retrying admission",
+      "url": "https://github.com/Soju06/codex-lb/pull/2088",
+      "upstream_head": "f251b60868a1e233fc5fddf1fcfb98e814c1aa9e",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2075,
+      "title": "fix(proxy): keep frameless bridge drops account neutral",
+      "url": "https://github.com/Soju06/codex-lb/pull/2075",
+      "upstream_head": "606e5d57aeab6040305fa74404c11472e76f7dcb",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2069,
+      "title": "fix(proxy): recover unanchored quota replay",
+      "url": "https://github.com/Soju06/codex-lb/pull/2069",
+      "upstream_head": "c6444d309c0b71e123c8c37a38942d6be6aeab2a",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2048,
+      "title": "fix(proxy): preserve exhausted sticky failover",
+      "url": "https://github.com/Soju06/codex-lb/pull/2048",
+      "upstream_head": "edcad62d6dc34f62859490224d9a2a05c5092c26",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 2001,
+      "title": "fix(proxy): release payload owner after pre-visible quota rejection",
+      "url": "https://github.com/Soju06/codex-lb/pull/2001",
+      "upstream_head": "c248d62d66cf0cdf32254fe2525b476fb32e461d",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 1962,
+      "title": "fix(proxy): preserve half-open probe ownership during cleanup",
+      "url": "https://github.com/Soju06/codex-lb/pull/1962",
+      "upstream_head": "76c3e4e1754d422e1bc537eaa09d38c20e88514f",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 1952,
+      "title": "fix(proxy): preserve tool search pairs through replay",
+      "url": "https://github.com/Soju06/codex-lb/pull/1952",
+      "upstream_head": "8b1cf36dd41c0c7c3d902be52b7bd405bb0da434",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 1905,
+      "title": "fix(proxy): preserve continuation ownership across source routing",
+      "url": "https://github.com/Soju06/codex-lb/pull/1905",
+      "upstream_head": "43ae5a04c204d46f370a5eb9c22e14c8be0802cd",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    },
+    {
+      "pr": 1903,
+      "title": "fix(proxy): bound memory used by paused bridge streams",
+      "url": "https://github.com/Soju06/codex-lb/pull/1903",
+      "upstream_head": "b28036815f619d0da436414db367ae4bc64f3941",
+      "disposition": "deferred",
+      "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
+      "local_commit": null
+    }
+  ]
+}
