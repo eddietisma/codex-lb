@@ -366,3 +366,8 @@ preserves that row and ends the pass after its current batch. For example,
 claiming generation 4 after cleanup selected generation 3 preserves the replay
 protection even when its timestamp still meets the stale cutoff. Retention and
 live-continuity predicates still apply on later passes.
+
+
+## Health persistence after terminal responses
+
+A failed account-error health write after a Responses terminal is logged without replacing the original terminal or preventing normal stream completion. Reservation settlement still precedes the health write, cancellation propagates, and upstream HTTP status evidence remains available to health classification.
