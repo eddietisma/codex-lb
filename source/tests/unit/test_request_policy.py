@@ -1097,13 +1097,14 @@ def test_reasoning_effort_allowlist_rejects_disallowed_configuration_update() ->
     assert client_reasoning_effort_for_log(request) == "max"
 
 
-def test_reasoning_effort_allowlist_rejects_update_that_outranks_allowed_alias() -> None:
+@pytest.mark.parametrize("enforced_model", [None, "gpt-5.6-sol-low"])
+def test_reasoning_effort_allowlist_rejects_update_that_outranks_allowed_alias(enforced_model: str | None) -> None:
     request = _responses_request_with_input([_configuration_update_item("max")], model="gpt-5.6-sol-xhigh")
     api_key = cast(
         ApiKeyData,
         SimpleNamespace(
             id="key-update-outranks-alias-policy",
-            enforced_model=None,
+            enforced_model=enforced_model,
             enforced_reasoning_effort=None,
             allowed_reasoning_efforts=["low", "xhigh"],
             enforced_service_tier=None,

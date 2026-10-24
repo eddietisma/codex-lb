@@ -360,7 +360,7 @@ def apply_api_key_enforcement(
                 api_key.enforced_model,
             )
         payload.model = api_key.enforced_model
-        if enforced_model_reasoning_effort is not None:
+        if enforced_model_reasoning_effort is not None and update_effort is None:
             client_reasoning_effort = enforced_model_reasoning_effort
             payload._codex_lb_client_reasoning_effort = client_reasoning_effort
         normalize_upstream_model_alias(payload)

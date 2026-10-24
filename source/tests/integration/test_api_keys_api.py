@@ -812,7 +812,8 @@ async def test_api_key_enforces_model_and_reasoning_for_responses(async_client, 
 
 
 @pytest.mark.asyncio
-async def test_api_key_rejects_disallowed_configuration_update_effort(async_client, monkeypatch):
+@pytest.mark.parametrize("enforced_model", [None, "gpt-5.6-sol-low"])
+async def test_api_key_rejects_disallowed_configuration_update_effort(async_client, monkeypatch, enforced_model):
     enable = await async_client.put(
         "/api/settings",
         json={
@@ -826,10 +827,16 @@ async def test_api_key_rejects_disallowed_configuration_update_effort(async_clie
 
     created = await async_client.post(
         "/api/api-keys/",
-        json={"name": "allowlist-update-effort", "allowedReasoningEfforts": ["low", "medium"]},
+        json={
+            "name": "allowlist-update-effort",
+            "allowedReasoningEfforts": ["low", "medium"],
+            "enforcedModel": enforced_model,
+            "limits": [{"limitType": "total_tokens", "limitWindow": "weekly", "maxValue": 100_000}],
+        },
     )
     assert created.status_code == 200
     key = created.json()["key"]
+    key_id = created.json()["id"]
 
     await _import_account(async_client, "acc_allowlist_update", "allowlist-update@example.com")
 
@@ -859,6 +866,12 @@ async def test_api_key_rejects_disallowed_configuration_update_effort(async_clie
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "reasoning_effort_not_allowed"
     assert upstream_calls == []
+
+    async with SessionLocal() as session:
+        reservations = await session.execute(
+            select(ApiKeyUsageReservation).where(ApiKeyUsageReservation.api_key_id == key_id)
+        )
+        assert reservations.scalars().all() == []
 
 
 @pytest.mark.asyncio

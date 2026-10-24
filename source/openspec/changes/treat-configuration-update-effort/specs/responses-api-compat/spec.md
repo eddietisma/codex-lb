@@ -90,6 +90,13 @@ their unrelated fields do not participate in effort authorization.
 - **THEN** the proxy rejects the request with code `reasoning_effort_not_allowed`
 - **AND** does not forward a request upstream
 
+#### Scenario: Configuration update outranks an enforced model alias for authorization
+
+- **GIVEN** an API key enforces model `gpt-5.6-sol-low` and allows only `low`
+- **WHEN** an input configuration update selects `max`
+- **THEN** the proxy returns `403` with code `reasoning_effort_not_allowed`
+- **AND** no upstream request or API-key usage reservation is created
+
 #### Scenario: Enforced effort conflicts with a configuration update
 
 - **GIVEN** an API key with `enforcedReasoningEffort: "low"`
