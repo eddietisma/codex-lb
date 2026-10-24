@@ -3,7 +3,9 @@
 ## Purpose
 
 Define sticky-session operation contracts so durable sessions, dashboard affinity, and prompt-cache affinity stay distinct.
+
 ## Requirements
+
 ### Requirement: Sticky sessions are explicitly typed
 
 The system SHALL persist each sticky-session mapping with an explicit kind so durable Codex backend affinity, durable dashboard sticky-thread routing, and bounded prompt-cache affinity can be managed independently. Budget-pressure reallocation MUST apply only to mappings whose kind/source is soft. A raw or legacy `codex_session` mapping MUST remain owner-bound because it may represent explicit turn-state continuity; budget pressure MUST NOT delete or rebind it.
@@ -1603,3 +1605,16 @@ When a pre-visible upstream failure on the HTTP stream transport is a code-less 
 - **THEN** the failover decision is `failover_next`
 - **AND** the next selection excludes account A and, while another candidate exists, the burst cooldown steers it away from A as well
 
+### Requirement: Hard continuity owners remain selectable during transient backoff
+
+Selection MUST admit the sole resolved hard continuity owner through transient error-backoff fallback when that owner otherwise passes eligibility checks. It MUST preserve the owner's error counters. Persisted unavailability, quota exhaustion, and cooldowns MUST retain their existing behavior. Ordinary multi-account selection MUST continue preferring eligible healthy accounts.
+
+#### Scenario: Active owner in transient backoff
+
+- **WHEN** an anchored request narrows selection to an otherwise eligible active owner in transient backoff
+- **THEN** selection admits that owner without clearing its error counters
+
+#### Scenario: Persistently unavailable owner
+
+- **WHEN** a required owner is paused or otherwise fails persisted eligibility
+- **THEN** selection fails closed without selecting a sibling
