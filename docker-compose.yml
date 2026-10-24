@@ -4,12 +4,13 @@ services:
       context: ./source
       dockerfile: ../Dockerfile
       args:
-        CODEX_LB_SOURCE_REVISION: 4660f197097e6d4160a6bcecafd9b9d5070900ff
-    image: codex-lb:upstream-fixes-4660f197
+        CODEX_LB_SOURCE_REVISION: 643808a6d95fc9faef725e841a7aea7604fef807
+    image: codex-lb:gpt6-redirect-643808a6
     container_name: codex-lb
     environment:
       CODEX_LB_DATABASE_URL: postgresql+asyncpg://codex_lb:${POSTGRES_PASSWORD}@postgres:5432/codex_lb
       CODEX_LB_DATABASE_MIGRATE_ON_STARTUP: "true"
+      CODEX_LB_MODEL_REDIRECTS: '{"gpt-6-astra":"gpt-6.1-sol","gpt-6-sol":"gpt-6.1-sol","gpt-6-luna":"gpt-6.1-sol"}'
       #CODEX_LB_PROXY_ACCOUNT_STREAM_LIMIT: "0"
       #CODEX_LB_DISABLE_WEBSOCKETS: "true"
       #CODEX_LB_FORCE_HTTP_STREAM: "true"
