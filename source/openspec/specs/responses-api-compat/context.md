@@ -342,3 +342,18 @@ For example, a 256-frame reasoning burst can remain queued while a send
 acknowledgement completes. Sustained overflow still terminates that connection
 without stopping the shared helper reader or unrelated connections. No automatic
 replay is added because a dispatched request may already have had effects.
+## Retry health and reset evidence
+
+HTTP bridge and direct WebSocket retry health use the same parsed reset
+evidence as terminal settlement. A keyed request retains that evidence in its
+deferred penalty until reservation settlement completes. See `spec.md`,
+"Retry health preserves upstream quota reset evidence", for the contract.
+
+For example, a five-day usage-limit reset must not become the 30-second
+metadata-free fallback: owner retirement compares the recorded horizon with
+the next request's recovery budget. The real deadline lets a later eligible
+request use the existing replacement path. Client anchors, file pins, replay
+proof requirements, transient-backoff policy, and automatic-reviewer session
+recovery remain separate constraints. Missing or invalid metadata, including
+JSON booleans, retains the established fallback. No setting or migration is
+required for this change.
