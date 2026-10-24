@@ -332,7 +332,7 @@ async def test_native_direct_adapter_classifies_helper_pong_timeout() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["transport", "protocol", "consumer_backpressure", "helper_exit"])
-async def test_native_receive_failure_logs_category_without_changing_relay_contract(
+async def test_native_receive_failure_logs_category_and_maps_local_buffer_failure(
     phase: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     class NativeConnection(_FakeNativeWebSocket):
@@ -342,10 +342,18 @@ async def test_native_receive_failure_logs_category_without_changing_relay_contr
     message = await NativeUpstreamWebSocket(cast(Any, NativeConnection())).receive()
 
     assert message.kind == "error"
-    assert message.error == "Upstream websocket receive failed"
+    assert message.error == (
+        "Local websocket receive buffer exceeded its bounded capacity"
+        if phase == "consumer_backpressure"
+        else "Upstream websocket receive failed"
+    )
     assert message.close_code is None
     assert message.error_code == (
-        proxy_websocket_module.PROCESS_NETWORK_UNAVAILABLE_CODE if phase == "helper_exit" else None
+        "upstream_consumer_backpressure"
+        if phase == "consumer_backpressure"
+        else proxy_websocket_module.PROCESS_NETWORK_UNAVAILABLE_CODE
+        if phase == "helper_exit"
+        else None
     )
     assert f"failure_phase={phase}" in caplog.text
     assert "secret upstream details" not in caplog.text
