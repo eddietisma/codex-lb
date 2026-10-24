@@ -219,6 +219,7 @@
   "apiKeys.form.assignedModelSources": "分配 Model source",
   "apiKeys.form.currentUsage": "当前用量",
   "apiKeys.form.enforcedModel": "强制 Model",
+  "apiKeys.form.enforcedModelHelp": "模型名称会强制应用于所有请求。使用精确的 source:target 模型名称重定向指定模型，多个规则用逗号分隔。",
   "apiKeys.form.enforcedReasoning": "强制 Effort",
   "apiKeys.form.enforcedServiceTier": "强制 service tier",
   "apiKeys.form.expiry": "过期时间",

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 
+from app.core.openai.model_enforcement import resolve_enforced_model
 from app.core.openai.model_registry import get_model_registry
 from app.db.models import ModelSource
 from app.db.session import detach_session_objects, get_background_session
@@ -83,7 +84,7 @@ def effective_model_for_api_key(api_key: ApiKeyData | None, requested_model: str
     """The model an API key forces, falling back to the requested one."""
     if api_key is None or api_key.enforced_model is None:
         return requested_model
-    return api_key.enforced_model
+    return resolve_enforced_model(api_key.enforced_model, requested_model)
 
 
 async def responses_model_is_source_owned(

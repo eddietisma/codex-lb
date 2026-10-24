@@ -275,13 +275,18 @@ function ApiKeyEditForm({ apiKey, busy, onSubmit, onClose }: ApiKeyEditFormProps
             </div>
 
             <div className="space-y-1">
-              <div className="text-sm font-medium">{t("apiKeys.form.enforcedModel")}</div>
+              <label htmlFor="edit-api-key-enforced-model" className="text-sm font-medium">{t("apiKeys.form.enforcedModel")}</label>
               <Input
+                id="edit-api-key-enforced-model"
+                aria-describedby="edit-api-key-enforced-model-help"
                 value={draft.enforcedModel}
                 onChange={(e) => updateDraft({ enforcedModel: e.target.value })}
-                placeholder="e.g. gpt-5.3-codex"
+                placeholder="gpt-6-sol:gpt-6.1-sol"
                 autoComplete="off"
               />
+              <p id="edit-api-key-enforced-model-help" className="text-xs text-muted-foreground">
+                {t("apiKeys.form.enforcedModelHelp")}
+              </p>
             </div>
 
             <div className="space-y-1">

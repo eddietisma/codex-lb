@@ -23,6 +23,7 @@ from app.core.config.dashboard_overrides import dashboard_overrides_bound, with_
 from app.core.config.settings import get_settings
 from app.core.config.settings_cache import get_settings_cache
 from app.core.exceptions import ProxyAuthError, ProxyRateLimitError
+from app.core.openai.model_enforcement import resolve_enforced_model
 from app.core.openai.models import CompactResponsePayload
 from app.core.openai.requests import ResponsesCompactRequest
 from app.core.resilience.toggles import bind_resilience_toggles
@@ -243,7 +244,9 @@ class _WarmupMixin:
         bind_resilience_toggles(dashboard_settings)
         configured_model = dashboard_settings.warmup_model
         prohibit_fast_mode = dashboard_settings.prohibit_fast_mode
-        effective_model = api_key.enforced_model if api_key and api_key.enforced_model else configured_model
+        effective_model = (
+            resolve_enforced_model(api_key.enforced_model, configured_model) if api_key else configured_model
+        )
         validate_model_access(api_key, effective_model)
         filtered_headers = filter_inbound_headers(headers)
 

@@ -6,6 +6,12 @@ import { createApiKey } from "@/test/mocks/factories";
 import { ApiKeyInfo } from "./api-key-info";
 
 describe("ApiKeyInfo", () => {
+  it("shows each saved conditional model redirect", () => {
+    render(<ApiKeyInfo apiKey={createApiKey({ enforcedModel: "gpt-6-sol:gpt-6.1-sol,gpt-6-luna:gpt-6.1-sol" })} />);
+    expect(screen.getByText("gpt-6-sol:gpt-6.1-sol")).toBeInTheDocument();
+    expect(screen.getByText("gpt-6-luna:gpt-6.1-sol")).toBeInTheDocument();
+  });
+
   it("renders prefix, allowed models, and enforcement metadata", () => {
 		render(
 			<ApiKeyInfo

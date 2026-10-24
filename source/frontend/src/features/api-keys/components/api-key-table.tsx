@@ -132,7 +132,17 @@ export function ApiKeyTable({ keys, busy, onEdit, onDelete, onRegenerate }: ApiK
 
           return (
             <TableRow key={apiKey.id}>
-              <TableCell className="pl-4 font-medium truncate">{apiKey.name}</TableCell>
+              <TableCell className="pl-4 font-medium whitespace-normal">
+                <div className="truncate">{apiKey.name}</div>
+                {apiKey.enforcedModel ? (
+                  <div className="mt-1 space-y-0.5 text-xs font-normal text-muted-foreground">
+                    <div>{t("apiKeys.form.enforcedModel")}</div>
+                    {apiKey.enforcedModel.split(",").map((rule) => (
+                      <div key={rule} className="break-all font-mono">{rule.trim()}</div>
+                    ))}
+                  </div>
+                ) : null}
+              </TableCell>
               <TableCell className="truncate font-mono text-xs">{apiKey.keyPrefix}</TableCell>
               <TableCell className="truncate">{models}</TableCell>
               <TableCell className="truncate text-xs tabular-nums">{trafficClass}</TableCell>

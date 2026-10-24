@@ -10,6 +10,7 @@ from app.core.config.settings import get_settings
 from app.core.errors import OpenAIErrorEnvelope, openai_error
 from app.core.exceptions import ProxyModelNotAllowed, ProxyReasoningEffortNotAllowed
 from app.core.openai.exceptions import ClientPayloadError
+from app.core.openai.model_enforcement import parse_model_enforcement, resolve_enforced_model
 from app.core.openai.model_registry import ModelRegistry, canonical_service_tier_value, get_model_registry
 from app.core.openai.requests import (
     ResponsesCompactRequest,
@@ -127,6 +128,8 @@ def validate_model_access(api_key: ApiKeyData | None, model: str | None) -> None
         return
     allowed_models = {resolve_model_alias(allowed_model) for allowed_model in api_key.allowed_models}
     effective_model = resolve_model_alias(model)
+    if parse_model_enforcement(api_key.enforced_model).redirects:
+        effective_model = resolve_model_alias(resolve_enforced_model(api_key.enforced_model, effective_model))
     if model is None or effective_model in allowed_models:
         return
     raise ProxyModelNotAllowed(f"This API key does not have access to model '{model}'")
@@ -349,18 +352,23 @@ def apply_api_key_enforcement(
         apply_prohibit_fast_mode(payload, prohibit_fast_mode=prohibit_fast_mode)
         return ApiKeyEnforcementResult(False, pre_normalization_effort)
 
-    if api_key.enforced_model:
-        enforced_model_reasoning_effort = _client_reasoning_effort_from_model(api_key.enforced_model)
+    enforced_model = resolve_enforced_model(api_key.enforced_model, payload.model)
+    if (
+        api_key.enforced_model
+        and enforced_model is not None
+        and (enforced_model != payload.model or ":" not in api_key.enforced_model)
+    ):
+        enforced_model_reasoning_effort = _client_reasoning_effort_from_model(enforced_model)
         requested_model = payload.model
-        if requested_model != api_key.enforced_model:
+        if requested_model != enforced_model:
             logger.info(
                 "api_key_model_enforced request_id=%s key_id=%s requested_model=%s enforced_model=%s",
                 get_request_id(),
                 api_key.id,
                 requested_model,
-                api_key.enforced_model,
+                enforced_model,
             )
-        payload.model = api_key.enforced_model
+        payload.model = enforced_model
         if enforced_model_reasoning_effort is not None and update_effort is None:
             client_reasoning_effort = enforced_model_reasoning_effort
             payload._codex_lb_client_reasoning_effort = client_reasoning_effort
@@ -633,6 +641,15 @@ def apply_api_key_enforcement_to_chat_payload(
 
     if api_key is None:
         return
+
+    model = payload.get("model")
+    if isinstance(model, str) and api_key.enforced_model:
+        enforced_model = resolve_enforced_model(api_key.enforced_model, resolve_model_alias(model))
+        if (
+            enforced_model != resolve_model_alias(model)
+            or not parse_model_enforcement(api_key.enforced_model).redirects
+        ):
+            payload["model"] = enforced_model
 
     if api_key.enforced_reasoning_effort is not None:
         enforced_effort = resolve_wire_reasoning_effort(api_key.enforced_reasoning_effort)

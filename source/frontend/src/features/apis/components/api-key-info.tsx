@@ -75,9 +75,11 @@ export function ApiKeyInfo({
 					<dd className="font-medium">{trafficClass}</dd>
 				</div>
 				{enforcedModel ? (
-					<div className="flex items-center justify-between gap-2">
-						<dt className="text-muted-foreground">{t("apiKeys.form.enforcedModel")}</dt>
-						<dd className="font-mono font-medium">{enforcedModel}</dd>
+					<div className="flex items-start justify-between gap-2">
+						<dt className="shrink-0 text-muted-foreground">{t("apiKeys.form.enforcedModel")}</dt>
+						<dd className="min-w-0 space-y-1 break-all text-right font-mono font-medium">
+							{enforcedModel.split(",").map((rule) => <div key={rule}>{rule.trim()}</div>)}
+						</dd>
 					</div>
 				) : null}
 				{enforcedEffort ? (

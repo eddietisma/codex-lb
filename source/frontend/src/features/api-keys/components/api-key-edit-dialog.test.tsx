@@ -13,6 +13,23 @@ import { ApiKeyEditDialog } from "./api-key-edit-dialog";
 import { hasLimitRuleChanges } from "./limit-rules-utils";
 
 describe("ApiKeyEditDialog", () => {
+  it("preserves saved conditional model redirects", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const rules = "gpt-6-sol:gpt-6.1-sol,gpt-6-luna:gpt-6.1-sol";
+    renderWithProviders(
+      <ApiKeyEditDialog open busy={false} apiKey={createApiKey({ enforcedModel: rules })} onOpenChange={vi.fn()} onSubmit={onSubmit} />,
+    );
+    const modelInput = screen.getByLabelText("Enforced Model");
+    expect(modelInput).toHaveAccessibleDescription("A model name forces all requests. Use exact source:target model names to redirect selected models; separate rules with commas.");
+    expect(modelInput).toHaveValue(rules);
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "Renamed key");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].enforcedModel).toBe(rules);
+  });
+
   function ControlledApiKeyEditDialog({
     apiKey = createApiKey({ allowedModels: [] }),
   }: {

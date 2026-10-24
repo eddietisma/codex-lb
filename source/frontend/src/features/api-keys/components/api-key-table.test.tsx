@@ -7,6 +7,16 @@ import { createApiKey, createDefaultApiKeys } from "@/test/mocks/factories";
 import { renderWithProviders } from "@/test/utils";
 
 describe("ApiKeyTable", () => {
+  it("shows saved model redirects beside allowed models", () => {
+    renderWithProviders(
+      <ApiKeyTable keys={[createApiKey({ allowedModels: ["gpt-6-sol"], enforcedModel: "gpt-6-sol:gpt-6.1-sol,gpt-6-luna:gpt-6.1-sol" })]} busy={false} onEdit={vi.fn()} onDelete={vi.fn()} onRegenerate={vi.fn()} />,
+    );
+    expect(screen.getByText("gpt-6-sol")).toBeInTheDocument();
+    expect(screen.getByText("Enforced Model")).toBeInTheDocument();
+    expect(screen.getByText("gpt-6-sol:gpt-6.1-sol")).toBeInTheDocument();
+    expect(screen.getByText("gpt-6-luna:gpt-6.1-sol")).toBeInTheDocument();
+  });
+
   it("renders the empty state when no keys are provided", () => {
     renderWithProviders(
       <ApiKeyTable

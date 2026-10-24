@@ -219,6 +219,7 @@
   "apiKeys.form.assignedModelSources": "할당 Model source",
   "apiKeys.form.currentUsage": "현재 사용량",
   "apiKeys.form.enforcedModel": "강제 Model",
+  "apiKeys.form.enforcedModelHelp": "모델 이름을 입력하면 모든 요청에 적용됩니다. 특정 모델만 리디렉션하려면 정확한 source:target 모델 이름을 사용하고 규칙은 쉼표로 구분하세요.",
   "apiKeys.form.enforcedReasoning": "Enforced Effort",
   "apiKeys.form.enforcedServiceTier": "강제 service tier",
   "apiKeys.form.expiry": "만료",

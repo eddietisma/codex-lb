@@ -11,6 +11,22 @@ import { renderWithProviders } from "@/test/utils";
 import { ApiKeyCreateDialog } from "./api-key-create-dialog";
 
 describe("ApiKeyCreateDialog", () => {
+  it("submits conditional model redirects", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const rules = "gpt-6-sol:gpt-6.1-sol,gpt-6-luna:gpt-6.1-sol";
+    renderWithProviders(
+      <ApiKeyCreateDialog open busy={false} onOpenChange={vi.fn()} onSubmit={onSubmit} />,
+    );
+    const modelInput = screen.getByLabelText("Enforced Model");
+    expect(modelInput).toHaveAccessibleDescription("A model name forces all requests. Use exact source:target model names to redirect selected models; separate rules with commas.");
+    await user.type(screen.getByLabelText("Name"), "Redirect key");
+    await user.type(modelInput, ` ${rules} `);
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].enforcedModel).toBe(rules);
+  });
+
   it("labels the reasoning effort trigger with its field and state", () => {
     renderWithProviders(
       <ApiKeyCreateDialog open busy={false} onOpenChange={vi.fn()} onSubmit={vi.fn()} />,

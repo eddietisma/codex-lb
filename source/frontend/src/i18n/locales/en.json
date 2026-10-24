@@ -219,6 +219,7 @@
   "apiKeys.form.assignedModelSources": "Assigned model sources",
   "apiKeys.form.currentUsage": "Current usage",
   "apiKeys.form.enforcedModel": "Enforced Model",
+  "apiKeys.form.enforcedModelHelp": "A model name forces all requests. Use exact source:target model names to redirect selected models; separate rules with commas.",
   "apiKeys.form.enforcedReasoning": "Enforced Effort",
   "apiKeys.form.enforcedServiceTier": "Enforced service tier",
   "apiKeys.form.expiry": "Expiry",

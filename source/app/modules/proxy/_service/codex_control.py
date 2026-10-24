@@ -28,6 +28,7 @@ from app.core.clients.proxy import codex_control_request as core_codex_control_r
 from app.core.config.settings import get_settings
 from app.core.config.settings_cache import get_settings_cache
 from app.core.errors import openai_error
+from app.core.openai.model_enforcement import unconditional_enforced_model
 from app.core.resilience.toggles import bind_resilience_toggles
 from app.core.upstream_proxy import ResolvedUpstreamRoute, UpstreamProxyRouteError
 from app.core.utils.request_id import ensure_request_id, get_request_id
@@ -285,7 +286,7 @@ class _CodexControlMixin:
             headers,
             codex_session_affinity=codex_session_affinity,
         )
-        selection_model = api_key.enforced_model if api_key is not None else None
+        selection_model = unconditional_enforced_model(api_key.enforced_model) if api_key is not None else None
         routing_strategy = _routing_strategy(settings)
         account_id_value: str | None = None
         log_status = "error"

@@ -62,12 +62,12 @@ def test_empty_redirects_preserve_model(monkeypatch: pytest.MonkeyPatch) -> None
 @pytest.mark.parametrize("allowed_model", ["gpt-6-sol", "gpt-6.1-sol"])
 @pytest.mark.parametrize("requested_model", ["gpt-6-sol", "gpt-6.1-sol"])
 def test_redirect_allowlist_canonicalization(allowed_model, requested_model, model_redirects) -> None:
-    api_key = cast(ApiKeyData, SimpleNamespace(allowed_models=frozenset({allowed_model})))
+    api_key = cast(ApiKeyData, SimpleNamespace(enforced_model=None, allowed_models=frozenset({allowed_model})))
     validate_model_access(api_key, requested_model)
 
 
 def test_redirect_does_not_bypass_model_allowlist(model_redirects) -> None:
-    api_key = cast(ApiKeyData, SimpleNamespace(allowed_models=frozenset({"gpt-5.5"})))
+    api_key = cast(ApiKeyData, SimpleNamespace(enforced_model=None, allowed_models=frozenset({"gpt-5.5"})))
     with pytest.raises(ProxyModelNotAllowed):
         validate_model_access(api_key, "gpt-6-sol")
 
@@ -389,31 +389,31 @@ def test_alias_equivalent_enforced_non_lite_model_rejects_responses_lite_payload
 
 
 def test_model_access_accepts_allowed_canonical_model_alias() -> None:
-    api_key = cast(ApiKeyData, SimpleNamespace(allowed_models=frozenset({"gpt-5.5"})))
+    api_key = cast(ApiKeyData, SimpleNamespace(enforced_model=None, allowed_models=frozenset({"gpt-5.5"})))
 
     validate_model_access(api_key, "gpt-5.5-extra-high-fast")
 
 
 def test_model_access_accepts_allowed_canonical_gpt56_model_alias() -> None:
-    api_key = cast(ApiKeyData, SimpleNamespace(allowed_models=frozenset({"gpt-5.6-sol"})))
+    api_key = cast(ApiKeyData, SimpleNamespace(enforced_model=None, allowed_models=frozenset({"gpt-5.6-sol"})))
 
     validate_model_access(api_key, "gpt-5.6-sol-extra-high-fast")
 
 
 def test_model_access_accepts_allowed_qualified_canonical_model_alias() -> None:
-    api_key = cast(ApiKeyData, SimpleNamespace(allowed_models=frozenset({"gpt-5.4-mini"})))
+    api_key = cast(ApiKeyData, SimpleNamespace(enforced_model=None, allowed_models=frozenset({"gpt-5.4-mini"})))
 
     validate_model_access(api_key, "gpt-5.4-mini-high")
 
 
 def test_model_access_accepts_allowed_cursor_alias_for_canonical_model() -> None:
-    api_key = cast(ApiKeyData, SimpleNamespace(allowed_models=frozenset({"gpt-5.4-mini-high"})))
+    api_key = cast(ApiKeyData, SimpleNamespace(enforced_model=None, allowed_models=frozenset({"gpt-5.4-mini-high"})))
 
     validate_model_access(api_key, "gpt-5.4-mini")
 
 
 def test_model_access_rejects_alias_when_canonical_model_not_allowed() -> None:
-    api_key = cast(ApiKeyData, SimpleNamespace(allowed_models=frozenset({"gpt-5.2"})))
+    api_key = cast(ApiKeyData, SimpleNamespace(enforced_model=None, allowed_models=frozenset({"gpt-5.2"})))
 
     with pytest.raises(ProxyModelNotAllowed):
         validate_model_access(api_key, "gpt-5.5-extra")
@@ -1285,3 +1285,62 @@ def test_log_effort_falls_back_to_request_level_effort_without_updates() -> None
     apply_api_key_enforcement(request, None)
 
     assert client_reasoning_effort_for_log(request) == "low"
+
+
+@pytest.mark.parametrize("model", ["gpt-6-sol", "gpt-6-astra", "gpt-reserve", "codex-auto-review"])
+@pytest.mark.parametrize("request_type", [ResponsesRequest, ResponsesCompactRequest])
+def test_key_conditional_redirect_preserves_other_models_and_policy(model, request_type) -> None:
+    api_key = cast(
+        ApiKeyData,
+        SimpleNamespace(
+            id="conditional",
+            enforced_model="gpt-6-sol:gpt-6.1-sol,gpt-6-astra:gpt-6.1-sol",
+            allowed_models=["gpt-6.1-sol", "gpt-reserve", "codex-auto-review"],
+            enforced_reasoning_effort=None,
+            allowed_reasoning_efforts=None,
+            enforced_service_tier=None,
+        ),
+    )
+    expected = "gpt-6.1-sol" if model in {"gpt-6-sol", "gpt-6-astra"} else model
+    request = request_type.model_validate(
+        {
+            "model": model,
+            "instructions": "",
+            "input": [],
+            "reasoning": {"effort": "high"},
+            "service_tier": "priority",
+        }
+    )
+    validate_model_access(api_key, model)
+    apply_api_key_enforcement(request, api_key)
+    apply_api_key_enforcement(request, api_key)
+    assert request.model == expected
+    assert request.reasoning.effort == "high"
+    assert request.service_tier == "priority"
+    chat: dict[str, JsonValue] = {"model": model, "reasoning_effort": "high", "service_tier": "priority"}
+    apply_api_key_enforcement_to_chat_payload(chat, api_key)
+    assert chat["model"] == expected
+    assert chat["reasoning_effort"] == "high"
+    assert chat["service_tier"] == "priority"
+
+
+def test_key_conditional_redirect_matches_canonical_alias_and_checks_target_access() -> None:
+    api_key = cast(
+        ApiKeyData,
+        SimpleNamespace(
+            id="conditional",
+            enforced_model="gpt-5.6-sol:gpt-6.1-sol",
+            allowed_models=["gpt-6.1-sol"],
+            enforced_reasoning_effort=None,
+            allowed_reasoning_efforts=None,
+            enforced_service_tier=None,
+        ),
+    )
+    request = ResponsesRequest.model_validate({"model": "gpt-5.6-sol-high", "instructions": "", "input": []})
+    validate_model_access(api_key, request.model)
+    apply_api_key_enforcement(request, api_key)
+    assert request.model == "gpt-6.1-sol"
+    assert request.reasoning.effort == "high"
+    api_key.allowed_models = ["gpt-5.6-sol"]
+    with pytest.raises(ProxyModelNotAllowed):
+        validate_model_access(api_key, "gpt-5.6-sol-high")

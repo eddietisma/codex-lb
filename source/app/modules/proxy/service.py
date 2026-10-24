@@ -114,6 +114,7 @@ from app.core.metrics.prometheus import (
     PROMETHEUS_AVAILABLE,
     bridge_same_account_takeover_total,
 )
+from app.core.openai.model_enforcement import unconditional_enforced_model
 from app.core.openai.models import CompactResponsePayload, OpenAIResponsePayload
 from app.core.openai.requests import (
     ResponsesCompactRequest,
@@ -1000,7 +1001,7 @@ class ProxyService(
         affinity = _sticky_key_for_thread_goal_request(
             payload, headers, codex_session_affinity, settings.openai_cache_affinity_max_age_seconds
         )
-        selection_model = api_key.enforced_model if api_key is not None else None
+        selection_model = unconditional_enforced_model(api_key.enforced_model) if api_key is not None else None
         routing_strategy = _routing_strategy(settings)
         account_id_value: str | None = None
         log_status = "error"

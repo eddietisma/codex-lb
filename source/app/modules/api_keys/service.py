@@ -18,6 +18,7 @@ from app.core.clients.thread_cache_identity import (
     THREAD_CACHE_IDENTITY_MODES,
     normalize_thread_cache_identity_mode,
 )
+from app.core.openai.model_enforcement import normalize_model_enforcement, parse_model_enforcement
 from app.core.usage.pricing import (
     UsageTokens,
     calculate_cost_from_usage,
@@ -487,7 +488,7 @@ class ApiKeysService:
         normalized_allowed_models = _normalize_allowed_models(payload.allowed_models)
         assigned_account_ids = await self._resolve_assigned_account_ids(payload.assigned_account_ids)
         assigned_source_ids = await self._resolve_assigned_source_ids(payload.assigned_source_ids)
-        enforced_model = _normalize_model_slug(payload.enforced_model)
+        enforced_model = _normalize_model_enforcement(payload.enforced_model)
         enforced_reasoning_effort = _normalize_reasoning_effort(payload.enforced_reasoning_effort)
         allowed_reasoning_efforts = _normalize_allowed_reasoning_efforts(payload.allowed_reasoning_efforts)
         enforced_service_tier = _normalize_service_tier(payload.enforced_service_tier)
@@ -630,7 +631,7 @@ class ApiKeysService:
             source_assignment_scope_enabled = _UNSET
 
         if payload.enforced_model_set:
-            enforced_model = _normalize_model_slug(payload.enforced_model)
+            enforced_model = _normalize_model_enforcement(payload.enforced_model)
         else:
             enforced_model = None
 
@@ -1659,12 +1660,22 @@ def _normalize_transport_policy_override_lenient(value: str | None) -> str | Non
     return None
 
 
+def _normalize_model_enforcement(value: str | None) -> str | None:
+    try:
+        return normalize_model_enforcement(value)
+    except ValueError as exc:
+        raise ApiKeyValidationError(str(exc)) from exc
+
+
 def _validate_model_enforcement(*, enforced_model: str | None, allowed_models: list[str] | None) -> None:
-    if enforced_model is None or not allowed_models:
-        return
-    if enforced_model not in allowed_models:
+    try:
+        policy = parse_model_enforcement(enforced_model)
+    except ValueError as exc:
+        raise ApiKeyValidationError(str(exc)) from exc
+    targets = [policy.target] if policy.target is not None else [target for _, target in policy.redirects]
+    if allowed_models and any(target not in allowed_models for target in targets):
         raise ApiKeyValidationError(
-            "enforced_model must be present in allowed_models when allowed_models is configured"
+            "enforced_model targets must be present in allowed_models when allowed_models is configured"
         )
 
 

@@ -26,9 +26,12 @@ _REDIRECTS = dict.fromkeys(("gpt-6-astra", "gpt-6-sol", "gpt-6-luna"), "gpt-6.1-
 _MODELS = [*_REDIRECTS, "gpt-6.1-sol", "gpt-5.6-sol"]
 
 
-@pytest.fixture
-def configured_redirects(monkeypatch):
-    monkeypatch.setattr(get_settings(), "model_redirects", _REDIRECTS)
+@pytest.fixture(params=["deployment", "api_key"])
+def configured_redirects(monkeypatch, request):
+    monkeypatch.setattr(get_settings(), "model_redirects", _REDIRECTS if request.param == "deployment" else {})
+    return (
+        ",".join(f"{source}:{target}" for source, target in _REDIRECTS.items()) if request.param == "api_key" else None
+    )
 
 
 @pytest.fixture
@@ -41,7 +44,12 @@ async def redirect_key(async_client, configured_redirects):
     enabled = await async_client.put("/api/settings", json={"apiKeyAuthEnabled": True})
     assert enabled.status_code == 200
     created = await async_client.post(
-        "/api/api-keys/", json={"name": "redirect", "allowedModels": ["gpt-6.1-sol", "gpt-5.6-sol"]}
+        "/api/api-keys/",
+        json={
+            "name": "redirect",
+            "allowedModels": ["gpt-6.1-sol", "gpt-5.6-sol"],
+            "enforcedModel": configured_redirects,
+        },
     )
     assert created.status_code == 200
     return created.json()["key"]
@@ -135,7 +143,11 @@ def test_websocket_redirects_reach_upstream_frame(
         async with SessionLocal() as session:
             service = ApiKeysService(ApiKeysRepository(session))
             key = await service.create_key(
-                ApiKeyCreateData(name="websocket redirect", allowed_models=["gpt-6.1-sol", "gpt-5.6-sol"])
+                ApiKeyCreateData(
+                    name="websocket redirect",
+                    allowed_models=["gpt-6.1-sol", "gpt-5.6-sol"],
+                    enforced_model=configured_redirects,
+                )
             )
             return await service.get_key_by_id(key.id)
 

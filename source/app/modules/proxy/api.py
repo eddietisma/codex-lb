@@ -141,6 +141,7 @@ from app.core.openai.images import (
     V1ImagesEditsForm,
     V1ImagesGenerationsRequest,
 )
+from app.core.openai.model_enforcement import unconditional_enforced_model
 from app.core.openai.model_registry import UpstreamModel, get_model_registry, is_public_model
 from app.core.openai.models import (
     CompactResponsePayload,
@@ -4090,8 +4091,8 @@ def _dump_v1_models_response(response: ModelListResponse) -> dict[str, JsonValue
 
 def _allowed_models_for_api_key(api_key: ApiKeyData | None) -> set[str] | None:
     allowed_models = _canonical_model_set(api_key.allowed_models) if api_key and api_key.allowed_models else None
-    if api_key and api_key.enforced_model:
-        forced = {_canonical_model_slug(api_key.enforced_model)}
+    if api_key and (forced_model := unconditional_enforced_model(api_key.enforced_model)):
+        forced = {_canonical_model_slug(forced_model)}
         return forced if allowed_models is None else (allowed_models & forced)
     return allowed_models
 
@@ -4100,8 +4101,8 @@ def _exact_source_allowed_models_for_api_key(api_key: ApiKeyData | None) -> set[
     if api_key is None:
         return None
     allowed_models = set(api_key.allowed_models) if api_key.allowed_models else None
-    if api_key.enforced_model:
-        forced = {api_key.enforced_model}
+    if forced_model := unconditional_enforced_model(api_key.enforced_model):
+        forced = {forced_model}
         return forced if allowed_models is None else (allowed_models & forced)
     return allowed_models
 
@@ -8883,9 +8884,7 @@ def _source_error_message(payload: Mapping[str, JsonValue]) -> str | None:
 
 
 def _effective_model_for_api_key(api_key: ApiKeyData | None, requested_model: str) -> str:
-    if api_key is None or api_key.enforced_model is None:
-        return requested_model
-    return api_key.enforced_model
+    return effective_model_for_api_key(api_key, requested_model) or requested_model
 
 
 def _effective_optional_model_for_api_key(api_key: ApiKeyData | None, requested_model: str | None) -> str | None:

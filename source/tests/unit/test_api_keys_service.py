@@ -2839,3 +2839,32 @@ async def test_touch_usage_reservation_reports_the_exhausted_lock_budget(
         and "sqlite_errorname=SQLITE_BUSY" in message
         for message in warnings
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", ["a:", "a:b,b:c", "a:b,a:c", "a:b,c"])
+async def test_create_key_rejects_invalid_conditional_model_policy(policy: str) -> None:
+    service = ApiKeysService(_FakeApiKeysRepository())
+    with pytest.raises(ApiKeyValidationError, match="enforced_model"):
+        await service.create_key(ApiKeyCreateData(name="invalid", allowed_models=None, enforced_model=policy))
+
+
+@pytest.mark.asyncio
+async def test_key_model_redirect_validation_checks_effective_update_policy() -> None:
+    service = ApiKeysService(_FakeApiKeysRepository())
+    created = await service.create_key(
+        ApiKeyCreateData(
+            name="redirect",
+            allowed_models=["gpt-6.1-sol"],
+            enforced_model=" gpt-6-sol : gpt-6.1-sol , gpt-6-astra:gpt-6.1-sol ",
+        )
+    )
+    assert created.enforced_model == "gpt-6-sol:gpt-6.1-sol,gpt-6-astra:gpt-6.1-sol"
+    with pytest.raises(ApiKeyValidationError, match="enforced_model"):
+        await service.update_key(created.id, ApiKeyUpdateData(allowed_models=["gpt-reserve"], allowed_models_set=True))
+    with pytest.raises(ApiKeyValidationError, match="enforced_model"):
+        await service.update_key(created.id, ApiKeyUpdateData(enforced_model="a:outside", enforced_model_set=True))
+    updated = await service.update_key(
+        created.id, ApiKeyUpdateData(enforced_model="gpt-6-luna:gpt-6.1-sol", enforced_model_set=True)
+    )
+    assert updated.enforced_model == "gpt-6-luna:gpt-6.1-sol"
