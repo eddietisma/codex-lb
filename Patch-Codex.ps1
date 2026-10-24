@@ -25,7 +25,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const assert = require('node:assert/strict');
-const { transform } = (() => {
+const { transform, transformSplit } = (() => {
 'use strict';
 // Structural matchers are deliberately narrow: unfamiliar layouts stop the patch.
 const path = require('node:path');
@@ -55,7 +55,7 @@ function bindings(text, kind) {
     }),
   }));
 }
-function importedSelector(source, asset, readFile, pattern, label) {
+function importedSelector(source, asset, readFile, pattern, label, missingImports) {
   const results = [];
   for (const clause of bindings(source, 'import')) {
     if (!clause.file?.endsWith('.js')) continue;
@@ -68,11 +68,84 @@ function importedSelector(source, asset, readFile, pattern, label) {
       const exported = exports.filter(item => item.original === match[1]);
       const imported = clause.names.filter(item => exported.some(entry => entry.local === item.original));
       for (const item of imported) results.push(item.local);
+      if (!imported.length && missingImports) for (const item of exported) {
+        const alias = 'codexLb' + label.replace(/[^a-z]/gi, '');
+        missingImports.add(`import{${item.local} as ${alias}}from${JSON.stringify(clause.file)};`);
+        results.push(alias);
+      }
     }
   }
   const candidates = [...new Set(results)];
   if (candidates.length !== 1) throw new Error(`Unsupported app layout: cannot resolve ${label} (${candidates.length} candidates)`);
   return candidates[0];
+}
+function providerHelpers(source, asset, readFile, readHook) {
+  const imports = new Set();
+  const target = importedSelector(source, asset, readFile,
+    new RegExp(`(${ID})=${ID}\\(${ID},\\(${ID},\\{get:${ID}\\}\\)=>\\{.{0,650}?return\\{activeWorkspaceRoot:`, 'g'), 'execution target atom', imports);
+  const config = importedSelector(source, asset, readFile,
+    new RegExp(`(${ID})=${ID}\\(${ID},\\(\\{cwd:(${ID})=null,hostId:(${ID})\\},\\{get:${ID},queryClient:${ID},scope:${ID}\\}\\)=>${ID}\\(\\{scope:${ID},queryClient:${ID},hostId:\\3,cwd:\\2,enabled:`, 'g'), 'effective config query', imports);
+  const provider = importedSelector(source, asset, readFile,
+    new RegExp(`(${ID})=${ID}\\(\\(\\{summary:(${ID})\\}\\)=>\\2\\.modelProvider\\|\\|null\\)`, 'g'), 'thread provider atom', imports);
+  return [...imports].join('') + helper + `function codexLbExternalThread(thread,host){let target=${readHook}(${target},thread),config=${readHook}(${config},{cwd:target.cwd,hostId:host}),provider=${readHook}(${provider},thread);return target.hostId===host&&codexLbUsesExternalUsage(provider??config.data?.model_provider)}`;
+}
+function importAlias(source, symbol, destination) {
+  const origin = bindings(source, 'import').flatMap(clause => clause.names.filter(name => name.local === symbol).map(name => ({ file: clause.file, name: name.original })));
+  if (origin.length !== 1) throw new Error('Cannot resolve shared import: ' + symbol);
+  const names = bindings(destination, 'import').filter(clause => clause.file === origin[0].file).flatMap(clause => clause.names.filter(name => name.original === origin[0].name));
+  if (names.length !== 1) throw new Error('Cannot resolve destination import: ' + symbol);
+  return names[0].local;
+}
+function transformSplit(sources, readFile) {
+  const changes = [], output = new Map();
+  const select = (prefix, marker) => {
+    const matches = [...sources.keys()].filter(key => key.startsWith('webview/assets/' + prefix + '-') && key.endsWith('.js') && (!marker || sources.get(key).includes(marker)));
+    if (matches.length !== 1) throw new Error('Expected one ' + prefix + ' bundle');
+    return matches[0];
+  };
+  const contentAsset = select('composer-content', 'dataUpdatedAt:'), content = sources.get(contentAsset);
+  const q = uniqueMatches(content, new RegExp(`function (${ID})\\((${ID})\\)\\{let (${ID})=\\(0,(${ID})\\.c\\)\\(\\d+\\),\\{hostId:(${ID}),selectedModel:(${ID})\\}=\\2,(${ID})=\\5===void 0\\?(${ID}):\\5,(${ID})=(${ID})\\((${ID})\\),`, 'g'), 'usage hook');
+  const end = content.indexOf('}var ' + q[4] + ',', q.index) + 1;
+  if (end <= q.index) throw new Error('Cannot locate usage hook boundary');
+  let quota = content.slice(q.index, end);
+  const thread = uniqueMatches(quota, new RegExp(`let (${ID})=(${ID}),${ID}=${escape(q[9])}\\.value\\.kind===`, 'g'), 'usage thread');
+  const resolver = uniqueMatches(quota, new RegExp(`${escape(thread[2])}=(${ID})\\(${escape(q[9])}\\)`, 'g'), 'thread resolver')[1];
+  const usage = uniqueMatches(quota, new RegExp(`\\{data:(${ID}),dataUpdatedAt:${ID}\\}=(${ID})\\((${ID})\\),(${ID})=\\2\\(${ID}\\),(${ID})=\\2\\((${ID})\\)`, 'g'), 'workspace usage atoms');
+  const insertion = uniqueMatches(quota, new RegExp(`let (${ID})=${ID}\\?\\?null,${ID}=(${ID})\\(${ID},\\1\\),${ID}=\\2\\(${ID},\\1\\),`, 'g'), 'usage provider injection');
+  const readHook = insertion[2];
+  const tail = uniqueMatches(quota, new RegExp(`,(${ID})\\}$`, 'g'), 'usage return');
+  const external = `codexLbExternalThread(${thread[1]},${q[7]})`;
+  // Read provider hooks before memoized output, then override the returned value.
+  quota = replaceOnce(quota, insertion[0], `let codexLbExternal=${external};` + insertion[0], 'composer usage', changes);
+  quota = replaceOnce(quota, tail[0], `,codexLbExternal?{...${tail[1]},rateLimit:null,rateLimitWarningThreshold:null,isUsageBannerEnabled:!1,sendBlocked:!1}:${tail[1]}}`, 'composer usage output', changes);
+  output.set(contentAsset, replaceOnce(content, content.slice(q.index, end), providerHelpers(content, contentAsset, readFile, readHook) + quota, 'usage module replacement', []));
+
+  const primaryAsset = select('app-primary'), primary = sources.get(primaryAsset);
+  const banner = uniqueMatches(primary, new RegExp(`function (${ID})\\(${ID}\\)\\{let ${ID}=\\(0,${ID}\\.c\\)\\(\\d+\\),\\{canShowUsageBanners:`, 'g'), 'usage banner');
+  const bannerEnd = primary.indexOf('function ', banner.index + banner[0].length);
+  let bannerCode = primary.slice(banner.index, bannerEnd);
+  const guard = uniqueMatches(bannerCode, new RegExp(`(${ID})=(${ID})\\(${ID},(${ID})\\);if\\(!(${ID})\\)return (${ID});`, 'g'), 'banner guard');
+  const currentThread = `${importAlias(content, resolver, primary)}(${importAlias(content, q[10], primary)}(${importAlias(content, q[11], primary)}))`;
+  const bannerAfter = guard[0].slice(0, guard[0].indexOf(';') + 1) + `let codexLbExternal=codexLbExternalThread(${currentThread},${guard[3]});if(!${guard[4]}||codexLbExternal)return ${guard[5]};`;
+  bannerCode = replaceOnce(bannerCode, guard[0], bannerAfter, 'usage banner', changes);
+  output.set(primaryAsset, replaceOnce(primary, primary.slice(banner.index, bannerEnd), providerHelpers(primary, primaryAsset, readFile, guard[2]) + bannerCode, 'banner module replacement', []));
+
+  const adapterAsset = select('codex-composer-adapter', 'STEPS_PROSE'), adapter = sources.get(adapterAsset);
+  const quotaAtom = importAlias(content, usage[6], adapter);
+  const adapterQuota = uniqueMatches(adapter, new RegExp(`(${ID})=${ID}\\(\\),(${ID})=(${ID})\\((${ID})===\x60local\x60&&${escape(quotaAtom)}\\),(${ID})=\\1===\x60STEPS_PROSE\x60\\?${ID}:null`, 'g'), 'composer adapter quota');
+  const head = adapter.slice(adapter.lastIndexOf('function ', adapterQuota.index), adapterQuota.index);
+  const adapterThread = uniqueMatches(head, new RegExp(`${escape(adapterQuota[4])}=(${ID})\\(${ID},(${ID})\\)`, 'g'), 'adapter thread');
+  const adapterAfter = adapterQuota[0].replace(`${adapterQuota[2]}=${adapterQuota[3]}(`, `codexLbExternal=codexLbExternalThread(${adapterThread[2]},${adapterQuota[4]}),${adapterQuota[2]}=!codexLbExternal&&${adapterQuota[3]}(`);
+  // The query hook must run even when codex-lb is selected.
+  const safeAfter = adapterAfter.replace(`!codexLbExternal&&${adapterQuota[3]}(${adapterQuota[4]}===\x60local\x60&&${quotaAtom})`, `${adapterQuota[3]}(${adapterQuota[4]}===\x60local\x60&&${quotaAtom})&&!codexLbExternal`);
+  output.set(adapterAsset, providerHelpers(adapter, adapterAsset, readFile, adapterThread[1]) + replaceOnce(adapter, adapterQuota[0], safeAfter, 'composer adapter quota', changes));
+
+  const initialAsset = select('app-initial'), initial = sources.get(initialAsset);
+  const gate = uniqueMatches(initial, new RegExp(`if\\((${ID})\\.requiresFirstPartyInference&&(${ID})\\(${ID},\x60\\d+\x60\\)\\)\\{let ${ID}=\\2\\(${ID},\\{hostId:${ID},cwd:null,failClosed:!0\\}\\),(${ID})=${ID}\\.isError,(${ID})=!\\3&&${ID}\\.data==null,(${ID})=${ID}\\.data==null\\?null:${ID}\\(${ID}\\.data\\.config\\)\\.model_provider;${ID}\\.push\\(\\{isLoading:\\4,isError:\\3,isCapable:!\\4&&!\\3&&\\(\\5\\?\\?\x60openai\x60\\)===\x60openai\x60\\}\\)\\}`, 'g'), 'dictation provider gate');
+  const request = uniqueMatches(initial.slice(initial.lastIndexOf('function ', gate.index), gate.index), new RegExp(`Explicit-host capability requires hostId: \\$\\{(${ID})\\.name\\}`, 'g'), 'capability request')[1];
+  const gateAfter = `let codexLbDictation=${request}.name===\x60dictation\x60||${request}.name.startsWith(\x60dictation.\x60);` + gate[0].replace(`(${gate[5]}??\x60openai\x60)===\x60openai\x60`, `((${gate[5]}??\x60openai\x60)===\x60openai\x60||codexLbDictation&&${gate[5]}===\x60codex-lb\x60)`);
+  output.set(initialAsset, replaceOnce(initial, gate[0], gateAfter, 'dictation provider', changes));
+  return { output, changes };
 }
 function transform(source, asset, readFile) {
   if (source.includes('codexLbUsesExternalUsage')) throw new Error('Source is already patched; use the unmodified installed app.');
@@ -81,7 +154,7 @@ function transform(source, asset, readFile) {
   const configAtom = importedSelector(source, asset, readFile,
     new RegExp(`(${ID})=${ID}\\(${ID},\\(\\{cwd:(${ID})=null,hostId:(${ID})\\},\\{get:${ID},queryClient:${ID},scope:${ID}\\}\\)=>${ID}\\(\\{scope:${ID},queryClient:${ID},hostId:\\3,cwd:\\2,enabled:`, 'g'), 'effective config query');
   const providerAtom = importedSelector(source, asset, readFile,
-    new RegExp(`(${ID})=${ID}\\(\\(\\{modelProvider:(${ID})\\}\\)=>\\2\\?\\?null\\)`, 'g'), 'thread provider atom');
+    new RegExp(`(${ID})=${ID}\\(\\(\\{summary:(${ID})\\}\\)=>\\2\\.modelProvider\\|\\|null\\)`, 'g'), 'thread provider atom');
 
   const q = uniqueMatches(source,
     new RegExp(`function (${ID})\\((${ID})\\)\\{let (${ID})=\\(0,(${ID})\\.c\\)\\(\\d+\\),\\{hostId:(${ID}),selectedModel:(${ID})\\}=\\2,(${ID})=\\5===void 0\\?(${ID}):\\5,(${ID})=(${ID})\\((${ID})\\),`, 'g'), 'usage hook');
@@ -123,12 +196,12 @@ function transform(source, asset, readFile) {
   patched = replaceOnce(patched, originalBanner, banner, 'banner replacement', []);
 
   const adapter = uniqueMatches(patched,
-    new RegExp(`(${ID})=${ID}\\(\\),(${ID})=${escape(queryHook)}\\(${escape(quotaAtom)}\\)&&(${ID})===\x60local\x60,(${ID})=\\1===\x60STEPS_PROSE\x60\\?${ID}:null`, 'g'), 'composer adapter quota');
+    new RegExp(`(${ID})=${ID}\\(\\),(${ID})=${escape(queryHook)}\\((${ID})===\x60local\x60&&${escape(quotaAtom)}\\),(${ID})=\\1===\x60STEPS_PROSE\x60\\?${ID}:null`, 'g'), 'composer adapter quota');
   const adapterStart = patched.lastIndexOf('function ', adapter.index);
   const adapterHead = patched.slice(adapterStart, adapter.index);
   const adapterThread = uniqueMatches(adapterHead,
     new RegExp(`${escape(adapter[3])}=${escape(readHook)}\\(${ID},(${ID})\\)`, 'g'), 'adapter thread')[1];
-  const adapterAfter = `${adapter[1]}=` + adapter[0].slice(adapter[0].indexOf('=') + 1, adapter[0].indexOf(',')) + `,codexLbAdapterTarget=codexLbReadTarget(${adapterThread}),codexLbAdapterConfig=codexLbReadConfig(codexLbAdapterTarget,codexLbAdapterTarget.hostId),codexLbAdapterProvider=codexLbReadProvider(${adapterThread})??codexLbAdapterConfig.data?.model_provider,${adapter[2]}=codexLbBlocksWorkspaceUsage(codexLbAdapterProvider,${queryHook}(${quotaAtom})&&${adapter[3]}===\x60local\x60),` + adapter[0].slice(adapter[0].lastIndexOf(',') + 1);
+  const adapterAfter = `${adapter[1]}=` + adapter[0].slice(adapter[0].indexOf('=') + 1, adapter[0].indexOf(',')) + `,codexLbAdapterTarget=codexLbReadTarget(${adapterThread}),codexLbAdapterConfig=codexLbReadConfig(codexLbAdapterTarget,codexLbAdapterTarget.hostId),codexLbAdapterProvider=codexLbReadProvider(${adapterThread})??codexLbAdapterConfig.data?.model_provider,${adapter[2]}=codexLbBlocksWorkspaceUsage(codexLbAdapterProvider,${queryHook}(${adapter[3]}===\x60local\x60&&${quotaAtom})),` + adapter[0].slice(adapter[0].lastIndexOf(',') + 1);
   patched = replaceOnce(patched, adapter[0], adapterAfter, 'composer adapter quota', changes);
   return {
     code: patched, changes, helpers: providerHelpers,
@@ -136,7 +209,7 @@ function transform(source, asset, readFile) {
     fragments: { quota, banner, adapter: adapterAfter.slice(adapterAfter.indexOf(',') + 1, adapterAfter.lastIndexOf(',')) },
   };
 }
-return { transform, helper };
+return { transform, transformSplit, helper };
 
 })();
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -180,26 +253,38 @@ function analyze(appDir) {
   try {
     const assets = [...archive.entries.keys()].filter(key => /^webview\/assets\/app-primary-[^/]+\.js$/.test(key));
     assert.equal(assets.length, 1, 'Expected one primary UI bundle; app layout changed');
-    const asset = assets[0], original = archive.read(asset);
-    const originalEntry = archive.entries.get(asset);
-    assert.equal(digest(original), originalEntry.integrity?.hash, 'Installed UI integrity mismatch');
     const cache = new Map();
-    const transformed = transform(original.toString('utf8'), asset, key => {
+    const readFile = key => {
       if (!cache.has(key)) cache.set(key, archive.read(key).toString('utf8'));
       return cache.get(key);
-    });
-    const syntax = spawnSync(process.execPath, ['--check', '--input-type=module'], { input: transformed.code, encoding: 'utf8', maxBuffer: 1024 * 1024 });
-    assert.equal(syntax.status, 0, 'Patched JavaScript syntax check failed: ' + syntax.stderr);
+    };
+    let output, changes;
+    const splitAssets = [...archive.entries.keys()].filter(key => /^webview\/assets\/(?:app-primary|app-initial|composer-content|codex-composer-adapter)-[^/]+\.js$/.test(key));
+    if (splitAssets.some(key => key.includes('/composer-content-'))) {
+      ({ output, changes } = transformSplit(new Map(splitAssets.map(key => [key, readFile(key)])), readFile));
+    } else {
+      const transformed = transform(readFile(assets[0]), assets[0], readFile);
+      output = new Map([[assets[0], transformed.code]]);
+      changes = transformed.changes;
+    }
+    const modifications = new Map();
+    for (const [asset, code] of output) {
+      const original = archive.read(asset);
+      assert.equal(digest(original), archive.entries.get(asset).integrity?.hash, 'Installed UI integrity mismatch: ' + asset);
+      const syntax = spawnSync(process.execPath, ['--check', '--input-type=module'], { input: code, encoding: 'utf8', maxBuffer: 1024 * 1024 });
+      assert.equal(syntax.status, 0, 'Patched JavaScript syntax check failed: ' + syntax.stderr);
+      modifications.set(asset, { bytes: Buffer.from(code), sourceSha256: digest(original) });
+    }
     const originalHeaderHash = digest(archive.raw), binary = fs.readFileSync(executable);
     const at = binary.indexOf(Buffer.from(originalHeaderHash));
     assert(at >= 0 && binary.indexOf(Buffer.from(originalHeaderHash), at + 64) < 0, 'Cannot uniquely resolve embedded ASAR integrity hash');
-    return { archive, archivePath, executable, binary, hashOffset: at, originalHeaderHash, asset, transformed, originalAssetHash: digest(original) };
+    return { archive, archivePath, executable, binary, hashOffset: at, originalHeaderHash, modifications, changes };
   } catch (error) {
     fs.closeSync(archive.fd);
     throw error;
   }
 }
-function verifyArchives(original, output, modifiedAsset, modifiedBytes) {
+function verifyArchives(original, output, modifications) {
   const changed = openArchive(output), a = Buffer.alloc(4194304), b = Buffer.alloc(a.length);
   let count = 0;
   try {
@@ -208,9 +293,9 @@ function verifyArchives(original, output, modifiedAsset, modifiedBytes) {
       const other = changed.entries.get(key);
       assert(other, key);
       if (entry.offset === undefined || entry.unpacked) { assert.deepEqual(other, entry); continue; }
-      if (key === modifiedAsset) {
+      if (modifications.has(key)) {
         const bytes = changed.read(key);
-        assert(bytes.equals(modifiedBytes));
+        assert(bytes.equals(modifications.get(key).bytes));
         assert.equal(digest(bytes), other.integrity.hash);
         for (let offset = 0, index = 0; offset < bytes.length; offset += other.integrity.blockSize, index++) {
           assert.equal(digest(bytes.subarray(offset, offset + other.integrity.blockSize)), other.integrity.blocks[index]);
@@ -247,12 +332,14 @@ function build(appDir, outputDir) {
     }
     collect(header.files);
     packed.sort((a, b) => Number(a.original.offset) - Number(b.original.offset));
-    const modified = Buffer.from(plan.transformed.code), target = packed.find(item => item.key === plan.asset);
-    target.entry.size = modified.length;
-    const blockSize = target.entry.integrity.blockSize;
-    assert(blockSize > 0 && Number.isSafeInteger(blockSize));
-    target.entry.integrity = { algorithm: 'SHA256', hash: digest(modified), blockSize, blocks: [] };
-    for (let offset = 0; offset < modified.length; offset += blockSize) target.entry.integrity.blocks.push(digest(modified.subarray(offset, offset + blockSize)));
+    for (const [asset, { bytes }] of plan.modifications) {
+      const target = packed.find(item => item.key === asset);
+      target.entry.size = bytes.length;
+      const blockSize = target.entry.integrity.blockSize;
+      assert(blockSize > 0 && Number.isSafeInteger(blockSize));
+      target.entry.integrity = { algorithm: 'SHA256', hash: digest(bytes), blockSize, blocks: [] };
+      for (let offset = 0; offset < bytes.length; offset += blockSize) target.entry.integrity.blocks.push(digest(bytes.subarray(offset, offset + blockSize)));
+    }
     let offset = 0;
     for (const item of packed) { item.entry.offset = String(offset); offset += item.entry.size; }
     const rawHeader = Buffer.from(JSON.stringify(header)), padding = (4 - rawHeader.length % 4) % 4;
@@ -266,7 +353,7 @@ function build(appDir, outputDir) {
     try {
       fs.writeSync(out, sizePickle); fs.writeSync(out, headerPickle);
       for (const item of packed) {
-        if (item.key === plan.asset) { fs.writeSync(out, modified); continue; }
+        if (plan.modifications.has(item.key)) { fs.writeSync(out, plan.modifications.get(item.key).bytes); continue; }
         for (let offset = 0; offset < item.original.size;) {
           const size = Math.min(chunk.length, item.original.size - offset);
           assert.equal(fs.readSync(archive.fd, chunk, 0, size, archive.start + Number(item.original.offset) + offset), size);
@@ -274,7 +361,7 @@ function build(appDir, outputDir) {
         }
       }
     } finally { fs.closeSync(out); }
-    const verifiedPackedFiles = verifyArchives(archive, temporary, plan.asset, modified);
+    const verifiedPackedFiles = verifyArchives(archive, temporary, plan.modifications);
     const newHeaderHash = digest(rawHeader), binary = Buffer.from(plan.binary);
     Buffer.from(newHeaderHash).copy(binary, plan.hashOffset);
     assert(binary.subarray(0, plan.hashOffset).equals(plan.binary.subarray(0, plan.hashOffset)));
@@ -284,11 +371,11 @@ function build(appDir, outputDir) {
     fs.renameSync(temporary, archiveOutput);
     fs.renameSync(executableOutput + '.partial', executableOutput);
     const manifest = {
-      patchFormat: 1, provider: 'codex-lb', builtAt: new Date().toISOString(), sourceApp: appDir,
-      asset: plan.asset, changes: plan.transformed.changes.map(change => change.name),
+      patchFormat: 2, provider: 'codex-lb', builtAt: new Date().toISOString(), sourceApp: appDir,
+      assets: [...plan.modifications].map(([asset, { bytes, sourceSha256 }]) => ({ asset, sourceSha256, patchedSha256: digest(bytes) })),
+      changes: plan.changes.map(change => change.name),
       sourceHeaderSha256: plan.originalHeaderHash, patchedHeaderSha256: newHeaderHash,
       sourceExecutableSha256: digest(plan.binary), patchedExecutableSha256: digest(binary),
-      sourceAssetSha256: plan.originalAssetHash, patchedAssetSha256: digest(modified),
       patchedArchiveSha256: hashFile(archiveOutput),
       sourceArchiveSize: fs.statSync(plan.archivePath).size, verifiedPackedFiles,
       installedFilesModified: false, diagnosticsIncluded: false, executableSignature: 'modified copy is unsigned',
@@ -299,6 +386,7 @@ function build(appDir, outputDir) {
 }
 function cached(appDir, outputDir) {
   const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'patch-manifest.json'), 'utf8'));
+  assert.equal(manifest.patchFormat, 2, 'Cached patch format changed; rebuild required');
   const source = openArchive(path.join(appDir, 'resources', 'app.asar'));
   const output = openArchive(path.join(outputDir, 'resources', 'app.asar'));
   try {
@@ -306,7 +394,10 @@ function cached(appDir, outputDir) {
     assert.equal(digest(output.raw), manifest.patchedHeaderSha256);
     assert.equal(digest(fs.readFileSync(path.join(appDir, 'ChatGPT.exe'))), manifest.sourceExecutableSha256);
     assert.equal(digest(fs.readFileSync(path.join(outputDir, 'ChatGPT.exe'))), manifest.patchedExecutableSha256);
-    assert.equal(digest(output.read(manifest.asset)), manifest.patchedAssetSha256);
+    for (const { asset, sourceSha256, patchedSha256 } of manifest.assets) {
+      assert.equal(digest(source.read(asset)), sourceSha256);
+      assert.equal(digest(output.read(asset)), patchedSha256);
+    }
     assert.equal(hashFile(path.join(outputDir, 'resources', 'app.asar')), manifest.patchedArchiveSha256);
     assert.equal(fs.statSync(path.join(appDir, 'resources', 'app.asar')).size, manifest.sourceArchiveSize);
     return true;
@@ -318,7 +409,7 @@ if (true) {
     if (!source || !['check', 'build', 'cached'].includes(action)) throw new Error('Usage: node patch-asar.cjs check|build|cached SOURCE_APP [OUTPUT_APP]');
     if (action === 'check') {
       const plan = analyze(source);
-      try { console.log(JSON.stringify({ compatible: true, asset: plan.asset, changes: plan.transformed.changes.map(change => change.name), sourceHeaderSha256: plan.originalHeaderHash })); }
+      try { console.log(JSON.stringify({ compatible: true, assets: [...plan.modifications.keys()], changes: plan.changes.map(change => change.name), sourceHeaderSha256: plan.originalHeaderHash })); }
       finally { fs.closeSync(plan.archive.fd); }
     } else if (action === 'cached') { cached(source, output); console.log('Cached patch verified.'); }
     else console.log(JSON.stringify(build(source, output), null, 2));
