@@ -264,6 +264,10 @@ def _websocket_event_error_type(*args: Any, **kwargs: Any) -> Any:
     return _service_global("_websocket_event_error_type")(*args, **kwargs)
 
 
+def _websocket_event_incomplete_reason(*args: Any, **kwargs: Any) -> Any:
+    return _service_global("_websocket_event_incomplete_reason")(*args, **kwargs)
+
+
 def _websocket_event_error_param(*args: Any, **kwargs: Any) -> Any:
     """Resolve error-parameter extraction through the proxy service facade."""
     return _service_global("_websocket_event_error_param")(*args, **kwargs)
