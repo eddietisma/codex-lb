@@ -357,3 +357,12 @@ proof requirements, transient-backoff policy, and automatic-reviewer session
 recovery remain separate constraints. Missing or invalid metadata, including
 JSON booleans, retains the established fallback. No setting or migration is
 required for this change.
+
+## Scheduled retry cleanup races
+
+Cleanup compares each selected retry-circuit timestamp, admission generation,
+failure count, and nullable detail before deleting it. A change after selection
+preserves that row and ends the pass after its current batch. For example,
+claiming generation 4 after cleanup selected generation 3 preserves the replay
+protection even when its timestamp still meets the stale cutoff. Retention and
+live-continuity predicates still apply on later passes.
