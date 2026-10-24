@@ -3,7 +3,9 @@
 ## Purpose
 
 Define API key lifecycle, enforcement, accounting, and dashboard management contracts for downstream clients.
+
 ## Requirements
+
 ### Requirement: API Key creation
 
 The system SHALL allow the admin to create API keys via `POST /api/api-keys` with a `name` (required), `allowedModels` (optional list), `weeklyTokenLimit` (optional integer), `expiresAt` (optional ISO 8601 datetime), `assignedAccountIds` (optional list), and `usageSections` (optional comma-separated string, defaults to `"upstream_limits,account_pool_usage"`). The system MUST generate a key in the format `sk-clb-{48 hex chars}`, store only the `sha256` hash in the database, and return the plain key exactly once in the creation response. The system MUST accept timezone-aware ISO 8601 datetimes for `expiresAt`, normalize them to UTC naive for persistence, and return the expiration as UTC in API responses.
@@ -698,7 +700,7 @@ The system SHALL expose `GET /v1/usage` for self-service usage lookup by API-key
 - `cached_input_tokens`
 - `total_cost_usd`
 - `limits[]` containing limits configured on the authenticated API key, with `limit_type`, `limit_window`, `max_value`, `current_value`, `remaining_value`, `model_filter`, `reset_at`, and `source`. When no API-key limits are configured and aggregate upstream quota details are visible to the caller, `limits[]` MAY mirror those aggregate upstream credit windows for legacy client compatibility.
-- `upstream_limits[]` containing aggregate upstream Codex credit windows when available, with the same fields and `source: "aggregate"`, subject to the key's `usage_sections` containing `upstream_limits`
+- `upstream_limits[]` containing aggregate upstream Codex credit windows when available, with the same fields and `source: "aggregate"`, subject to the key's `usage_sections` containing `upstream_limits`. An account's latest sample whose `reset_at` has elapsed MUST count as a reset window (0% used, no reset time) before aggregation, so an account that stopped reporting a window cannot pin the aggregate `reset_at` or `current_value` to a past window.
 - `account_pool_usage` containing `primary` and `secondary` float remaining percentages, subject to the key's `usage_sections` containing `account_pool_usage`
 
 Validation failures MUST use the existing OpenAI error envelope used by `/v1/*` routes.
@@ -741,6 +743,14 @@ Validation failures MUST use the existing OpenAI error envelope used by `/v1/*` 
 
 - **WHEN** `api_key_auth_enabled` is false and a client calls `GET /v1/usage` with a valid Bearer key
 - **THEN** the system still authenticates that key and returns the self-usage payload
+
+#### Scenario: Elapsed samples do not pin the aggregate reset
+
+- **GIVEN** account A reports a live 5h sample resetting in four hours
+- **AND** account B stopped reporting the 5h window and its last sample reset nineteen days ago at 99% used
+- **WHEN** an API key with visible upstream limits calls `GET /v1/usage`
+- **THEN** the aggregate 5h `reset_at` is account A's reset
+- **AND** account B contributes no used credits to the aggregate 5h `current_value`
 
 ### Requirement: API key cost accounting uses the billable service tier
 API key cost accounting MUST continue to use the effective billable `service_tier` chosen for the request log and MUST NOT derive pricing from the operator-requested tier when the upstream reports a different actual tier.
@@ -1942,4 +1952,3 @@ The database SHALL provide an index that supports filtering request logs by API 
 - **WHEN** database migrations are applied
 - **THEN** the `request_logs` table includes an index whose leading key columns are `api_key_id` and descending `requested_at`
 - **AND** the 7-day account-cost breakdown query for an API key is satisfiable by that index for its filter phase
-

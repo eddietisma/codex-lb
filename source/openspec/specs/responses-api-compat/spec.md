@@ -10374,14 +10374,32 @@ When a Responses stream has observed and delivered a terminal event (`response.c
 
 When an authenticated API key has a non-null
 `allowedReasoningEfforts` policy, the proxy MUST derive the client-selected
-effort from an explicit `reasoning.effort` or a supported model alias before
-performing wire-level normalization. Policy values remain exact client-plane
+effort before performing wire-level normalization. The derived effort is the
+last `configuration_update` input item that carries a non-blank
+`reasoning.effort` when one is present; otherwise a supported model alias that
+selects an effort; otherwise an explicit request-level `reasoning.effort`.
+Policy values remain exact client-plane
 choices: `xhigh` does not authorize `high`, and `ultra` does not authorize
 `max`, even where their downstream wire forms coincide. If the client-selected
 effort is not in the policy, the
 proxy MUST reject the request before quota reservation, account or source
 selection, or upstream dispatch. The rejection MUST use HTTP 403, OpenAI error type `permission_error`, code
 `reasoning_effort_not_allowed`, and parameter `reasoning.effort`.
+
+A `configuration_update` input item is the client's most recent selection and
+applies from its position onward, so the last such item is the effective one.
+Only a JSON object item whose `type` is `configuration_update` and whose
+`reasoning.effort` is a non-blank string participates. Item effort values MUST
+be trimmed and case-normalized before authorization, exactly like the
+request-level field. The item form MUST NOT be rewritten or removed: items are
+forwarded verbatim to upstream, and only the derived value drives policy,
+logging, and accounting.
+
+Because items are forwarded verbatim, an API key with a non-null
+`enforcedReasoningEffort` MUST reject a request whose update item selects a
+different effort: rewriting only the request-level field would still let the
+item apply upstream. The rejection uses the same HTTP 403,
+`reasoning_effort_not_allowed` code and `reasoning.effort` parameter.
 
 The policy MUST apply to Responses, compact Responses, and WebSocket Responses
 requests. Its WebSocket error event MUST preserve the same error code and
@@ -10413,6 +10431,52 @@ their unrelated fields do not participate in effort authorization.
 - **THEN** the proxy returns `403` with code `reasoning_effort_not_allowed`
 - **AND** no API-key quota reservation or upstream request is created
 
+#### Scenario: Configuration update effort is authorized as the client-selected value
+
+- **GIVEN** an API key with `allowedReasoningEfforts: ["low", "medium"]`
+- **WHEN** a Responses request carries
+  `{"type": "configuration_update", "reasoning": {"effort": "medium"}}` as an
+  input item and no different request-level effort
+- **THEN** the request is authorized and forwarded
+- **AND** the item is forwarded verbatim
+
+#### Scenario: Disallowed configuration update effort is rejected before dispatch
+
+- **GIVEN** an API key with `allowedReasoningEfforts: ["low", "medium"]`
+- **WHEN** a Responses request carries
+  `{"type": "configuration_update", "reasoning": {"effort": "max"}}` as an
+  input item
+- **THEN** the proxy returns `403` with code `reasoning_effort_not_allowed`
+- **AND** no API-key quota reservation or upstream request is created
+
+#### Scenario: Configuration update outranks a model alias
+
+- **GIVEN** an API key with `allowedReasoningEfforts: ["low"]`
+- **WHEN** a client sends an effort-bearing model alias that selects `low` and
+  also carries
+  `{"type": "configuration_update", "reasoning": {"effort": "max"}}`
+- **THEN** the proxy rejects the request with code `reasoning_effort_not_allowed`
+- **AND** does not forward a request upstream
+
+#### Scenario: Configuration update outranks an enforced model alias for authorization
+
+- **GIVEN** an API key enforces model `gpt-5.6-sol-low` and allows only `low`
+- **WHEN** an input configuration update selects `max`
+- **THEN** the proxy returns `403` with code `reasoning_effort_not_allowed`
+- **AND** no upstream request or API-key usage reservation is created
+
+#### Scenario: Enforced effort conflicts with a configuration update
+
+- **GIVEN** an API key with `enforcedReasoningEffort: "low"`
+- **WHEN** a Responses request carries
+  `{"type": "configuration_update", "reasoning": {"effort": "high"}}` as an
+  input item
+- **THEN** the proxy returns `403` with code `reasoning_effort_not_allowed`
+- **AND** does not forward a request upstream
+
+An enforced effort cannot be guaranteed while a verbatim item selects a
+different one, so the request MUST fail instead of logging the enforced value.
+
 #### Scenario: Alias effort is evaluated as the client-selected value
 
 - **GIVEN** an API key with `allowedReasoningEfforts: ["low", "medium"]`
@@ -10423,7 +10487,8 @@ their unrelated fields do not participate in effort authorization.
 #### Scenario: Omitted effort remains compatible
 
 - **GIVEN** an API key with `allowedReasoningEfforts: ["low", "medium"]`
-- **WHEN** a Responses request omits `reasoning.effort` and uses no effort alias
+- **WHEN** a Responses request omits `reasoning.effort`, uses no effort alias,
+  and carries no configuration update item
 - **THEN** the proxy does not add or replace a reasoning effort
 - **AND** the request continues through the existing route
 
@@ -10480,7 +10545,7 @@ their unrelated fields do not participate in effort authorization.
 - **WHEN** a Responses request supplies `reasoning.effort: "low"` and
   `thinking: {"type": "adaptive", "budget_tokens": 2048}`
 - **THEN** the source receives both the authorized canonical effort and the
-  original `thinking` object
+  provider control with its unrelated fields intact
 
 ### Requirement: Verified full resend can recover from selection-time owner loss
 
@@ -10927,7 +10992,6 @@ The account-neutral fresh-replay classifier MUST accept an optional boolean `gen
 - **WHEN** it also contains a boolean generate control
 - **THEN** the generate control does not permit moving the request to a different account
 
-
 ### Requirement: Native WebSocket bursts retain bounded ordered delivery
 The native WebSocket adapter MUST retain ordered delivery of at least 256 small frames while its consumer is temporarily unscheduled. Its decoded receive queue MUST be bounded by 4096 events and 32 MiB of accounted payload bytes, including UTF-8 text, binary data and the second payload representation for interpreted Responses frames. It MUST continue processing send acknowledgements without waiting for the data consumer. A genuinely overflowing connection MUST fail locally without blocking unrelated connections or penalizing account health. This change MUST preserve the existing HTTP event-queue single-event allowance.
 
@@ -11012,7 +11076,6 @@ Scheduled retry-circuit cleanup MUST delete only the observation timestamp, admi
 - **WHEN** selected rows do not change
 - **THEN** cleanup MUST preserve the existing retention grace and tombstone/live-continuity protections and MUST continue deleting eligible rows across batches
 
-
 ### Requirement: Post-terminal health failures preserve stream completion
 After publishing a terminal Responses event, the proxy MUST log ordinary failures from subsequent account-error health writes without emitting another terminal event or aborting stream completion. This MUST apply to first-event, later-event, and raised upstream errors, with and without an API-key reservation. Required reservation settlement MUST precede the health write. Cancellation MUST retain its existing propagation and cleanup behavior.
 
@@ -11045,3 +11108,73 @@ For an otherwise eligible pre-response HTTP-bridge attempt, the proxy MUST accou
 #### Scenario: Existing attempt exclusions
 - **WHEN** a reason-only stream failure belongs to an attempt excluded by existing circuit eligibility or duplicate guards
 - **THEN** the terminal does not add a circuit failure
+
+### Requirement: Required-owner WebSocket connection failures preserve the upstream error
+
+When a direct Responses WebSocket connection has a hard required account and
+its classified upstream failure reaches the shared deterministic failover
+decision, the proxy MUST surface the original upstream status and error payload
+without excluding that required account and reselecting it. The decision MUST
+retain the existing account classification and stream-lease cleanup behavior.
+
+A movable request MUST retain its existing pre-visible failover eligibility.
+This requirement MUST NOT change the dedicated authentication-refresh or
+confirmed pre-dispatch transport branches.
+
+#### Scenario: Retryable 403 with a required replay owner
+
+- **GIVEN** a WebSocket request requires account A for replay
+- **WHEN** opening A returns a 403 carrying a retryable upstream error
+- **THEN** the client receives that original 403 error
+- **AND** no second account selection or upstream open occurs
+
+#### Scenario: Movable retryable 403
+
+- **GIVEN** a WebSocket request has no hard account requirement
+- **WHEN** opening account A returns a retryable 403 and account B is eligible
+- **THEN** the proxy retains its existing failover to B
+
+#### Scenario: Plain forbidden 403
+
+- **GIVEN** a WebSocket handshake returns an ordinary forbidden 403
+- **WHEN** the proxy classifies the failure as non-retryable
+- **THEN** the original 403 remains terminal for both required-owner and movable requests
+
+#### Scenario: Required-owner quota failure
+
+- **GIVEN** a WebSocket request requires its previous-response owner
+- **WHEN** that owner returns a classified quota failure before connection
+- **THEN** the client receives the original quota status and error payload
+- **AND** the account quota classification is retained without selecting another account
+
+### Requirement: WebSocket close 1009 is terminal and account-neutral
+
+When an upstream adapter exposes close code 1009 for pending Responses work,
+the HTTP bridge and direct WebSocket relay MUST report payload_too_large.
+This is an exact-code exception to "Upstream websocket drops penalize affected
+accounts": it MUST NOT cause identical replay, account exclusion/rotation or
+account error-health writes. Existing terminal cleanup MUST settle reservations,
+release response-create ownership and retire the failed socket.
+
+Before an HTTP response is committed the error MUST use HTTP 400 with
+type=invalid_request_error and param=input. After commitment it MUST use the
+existing terminal SSE error contract without duplicating visible output.
+The direct WebSocket route MUST use its existing terminal error envelope.
+Explicit request-state overrides MUST remain authoritative.
+
+#### Scenario: Single account rejects the message size
+
+- **WHEN** the only selected account closes 1009 before response.created
+- **THEN** the client receives payload_too_large without another dispatch or a no_accounts replacement
+- **AND** a following valid request can select that same account
+
+#### Scenario: Close after output
+
+- **WHEN** upstream closes 1009 after response creation or visible output
+- **THEN** exactly one terminal size error is delivered without replaying the turn
+- **AND** already-delivered output is not duplicated
+
+#### Scenario: Other disconnects are unchanged
+
+- **WHEN** the adapter exposes 1000, 1006, another close code, or no close code
+- **THEN** this exception does not replace the existing retry and error classification

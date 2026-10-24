@@ -3,7 +3,9 @@
 ## Purpose
 
 Define proxy observability contracts so runtime failures, routing decisions, and admission rejections remain diagnosable.
+
 ## Requirements
+
 ### Requirement: Proxy 4xx/5xx responses are logged with error detail
 When the proxy returns a 4xx or 5xx response for a proxied request, the system MUST log the request id, method, path, status code, error code, and error message to the console. For local admission rejections, the log MUST also include the rejection stage or lane.
 
@@ -1207,8 +1209,15 @@ text. A match MUST NOT consume CR or LF or any text from a following line.
 Unterminated JSON secret values MUST be redacted through the end of the
 current line. A Bearer credential MUST treat a glued `:` tail on the same
 line as credential material. Same-line comma and ampersand separators MUST
-keep their existing truncation behavior. Records below WARNING MUST still
-skip these keyed patterns.
+keep their existing truncation behavior for keyed values and for
+authorization values whose Bearer or Basic token is redacted by the token
+patterns. Whether a value qualifies MUST be decided from the value as it
+arrived, before the token patterns run. Every other authorization value,
+including one whose scheme is not Bearer or Basic, one that only begins with
+`Bearer` or `Basic` without a token, one that arrives already reading
+`Bearer [REDACTED]` or `Basic [REDACTED]`, and one whose key is followed by a
+closing double quote before the separator, MUST be redacted through the end of
+the current line. Records below WARNING MUST still skip these keyed patterns.
 
 #### Scenario: Authorization does not swallow the next traceback line
 
@@ -1248,6 +1257,53 @@ skip these keyed patterns.
 - **WHEN** secret-pattern redaction is applied once and then again
 - **THEN** the terminator bytes and line count are unchanged
 - **AND** the second pass equals the first
+
+#### Scenario: Digest auth-param list is redacted through end of line
+
+- **GIVEN** a WARNING or higher record contains
+  `Authorization: Digest username="svc", realm="api", nonce="n1", response="6629fae4"`
+- **WHEN** the text or JSON formatter renders the record
+- **THEN** the rendered text contains `Authorization: [REDACTED]`
+- **AND** neither `realm=` nor `response=` nor `6629fae4` appears
+
+#### Scenario: AWS SigV4 auth-param list is redacted through end of line
+
+- **GIVEN** a WARNING or higher record contains
+  `Authorization: AWS4-HMAC-SHA256 Credential=AKID/aws4_request, SignedHeaders=host;x-amz-date, Signature=fe5f80f7`
+- **WHEN** the text or JSON formatter renders the record
+- **THEN** the rendered text contains `Authorization: [REDACTED]`
+- **AND** neither `Signature=` nor `fe5f80f7` appears
+
+#### Scenario: Quoted authorization key with a Digest value is redacted
+
+- **GIVEN** a WARNING or higher record contains
+  `{"authorization": Digest username="public", malformed, response="QA_SECRET"}`
+- **WHEN** the text or JSON formatter renders the record
+- **THEN** the rendered text contains `{"authorization": [REDACTED]`
+- **AND** `QA_SECRET` does not appear
+
+#### Scenario: Basic credential keeps the comma bound
+
+- **GIVEN** a WARNING or higher record contains
+  `Authorization: Basic dXNlcjpwYXNz, status=failed`
+- **WHEN** the text formatter renders the record
+- **THEN** the rendered text contains `Authorization: [REDACTED], status=failed`
+
+#### Scenario: Malformed Bearer value fails closed
+
+- **GIVEN** a WARNING or higher record contains
+  `Authorization: Bearer-x a, response=SECRET`
+- **WHEN** the text formatter renders the record
+- **THEN** the rendered text contains `Authorization: [REDACTED]`
+- **AND** neither `response=` nor `SECRET` appears
+
+#### Scenario: A value that arrives already redacted fails closed
+
+- **GIVEN** a WARNING or higher record contains
+  `Authorization: Bearer [REDACTED], response=SECRET`
+- **WHEN** the text formatter renders the record
+- **THEN** the rendered text contains `Authorization: [REDACTED]`
+- **AND** neither `response=` nor `SECRET` appears
 
 ### Requirement: Upstream reasoning-replay rejections are counted
 
@@ -1390,3 +1446,71 @@ The system MUST provide a single migration head when the published affinity hist
 - **WHEN** only the merge revision is downgraded and then upgraded again
 - **THEN** both parent histories MUST remain applied and all schema and data MUST be preserved
 - **AND** the earlier credential projection MUST NOT run again
+
+### Requirement: Request logs persist the effective client reasoning effort
+
+For Responses, compact Responses, and WebSocket Responses request-log rows, the
+proxy MUST persist on `request_logs.reasoning_effort` the effort the request
+pipeline configured, not the raw request-level field. The configured effort is
+the last `configuration_update` input item that carries a non-blank
+`reasoning.effort` when one is present; otherwise the effort selected by a
+supported model alias; otherwise the request-level `reasoning.effort`. When an
+API-key policy fixed the effort, the fixed value is the configured value.
+
+Persisted values MUST use the wire-safe form the upstream payload received:
+`ultra` is recorded as `max`, and an effort the upstream rejects (currently
+`minimal`) is recorded as the fallback value. This keeps new rows comparable
+with rows written before the item form existed. When no configured effort is
+recorded, the request-level value is persisted unchanged.
+
+#### Scenario: Mid-conversation update is the logged effort
+
+- **WHEN** a Responses request keeps `reasoning.effort: "none"` at request level
+  and carries `{"type": "configuration_update", "reasoning": {"effort": "high"}}`
+- **THEN** the persisted request-log row stores `reasoning_effort = "high"`
+
+#### Scenario: Last update wins
+
+- **WHEN** a request carries configuration updates for `low` and then `medium`
+- **THEN** the persisted request-log row stores `reasoning_effort = "medium"`
+
+#### Scenario: Enforced effort is the logged effort
+
+- **GIVEN** an API key with an enforced reasoning effort
+- **WHEN** a Responses request carries a different client effort or a
+  configuration update item
+- **THEN** the persisted request-log row stores the enforced effort
+- **AND** the upstream payload carries the same enforced effort
+
+#### Scenario: Requests without updates keep the request-level value
+
+- **WHEN** a Responses request carries no configuration update item and no
+  effort-bearing alias
+- **THEN** the persisted request-log row stores the request-level effort
+  unchanged
+
+#### Scenario: Client-plane aliases are logged in wire form
+
+- **WHEN** the configured effort is `ultra`
+- **THEN** the persisted request-log row stores `reasoning_effort = "max"`
+
+### Requirement: The metrics server does not reconfigure process logging
+
+When metrics are enabled, starting the in-process Prometheus metrics server
+MUST NOT change the level, handlers, or formatters of any logger configured
+by the server command. Main-server access lines MUST keep being written with
+codex-lb's redacting formatters after the metrics server starts. Requests to
+the metrics endpoint MAY appear in the same access log.
+
+#### Scenario: Access logging survives metrics startup
+
+- **GIVEN** metrics are enabled
+- **WHEN** a client requests `GET /health` after the metrics server has started
+- **THEN** the access line for that request is written
+- **AND** credentials in the request target are redacted in that line
+
+#### Scenario: Metrics scrapes are access-logged
+
+- **GIVEN** metrics are enabled
+- **WHEN** a client requests `GET /metrics` on the metrics port
+- **THEN** the access log may contain a line for that request
