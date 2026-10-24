@@ -889,5 +889,18 @@
       "reason": "Not imported; needs an independent local reproduction and scoped compatibility validation",
       "local_commit": null
     }
-  ]
+  ],
+  "deployment": {
+    "compose_commit": "f4265ee",
+    "image": "codex-lb:upstream-fixes-4660f197",
+    "source_revision": "4660f197097e6d4160a6bcecafd9b9d5070900ff",
+    "app_recreated_detached": true,
+    "postgres_recreated": false,
+    "readiness": "ok",
+    "dashboard_http": 200,
+    "changed_source_files_verified": 30,
+    "account_and_api_key_identities_preserved": true,
+    "schema_revision": "20261008_000000_add_throughput_covering_index",
+    "successful_live_requests_observed_after_restart": 19
+  }
 }
