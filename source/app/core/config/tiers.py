@@ -90,6 +90,8 @@ SETTING_TIERS: Final[dict[str, Tier]] = {
     "model_registry_client_version": "T1",
     "model_registry_snapshot_max_age_seconds": "T1",
     "model_context_window_overrides": "T3",
+    # Exact substitutions depend on the model names available in this deployment.
+    "model_redirects": "T1",
     # raw socket-peer CIDRs of this replica's network namespace; sibling of the
     # trusted-proxy CIDRs below, not of the firewall allowlist (projected IPs)
     "proxy_unauthenticated_client_cidrs": "T1",

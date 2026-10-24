@@ -21,6 +21,106 @@ from app.modules.proxy.request_policy import (
 )
 
 
+@pytest.fixture
+def model_redirects(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    redirects = {model: "gpt-6.1-sol" for model in ("gpt-6-astra", "gpt-6-sol", "gpt-6-luna")}
+    monkeypatch.setattr(
+        "app.modules.proxy.request_policy.get_settings", lambda: SimpleNamespace(model_redirects=redirects)
+    )
+    return redirects
+
+
+@pytest.mark.parametrize("request_type", [ResponsesRequest, ResponsesCompactRequest])
+@pytest.mark.parametrize("model", ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"])
+def test_configured_model_redirect_preserves_reasoning_and_tier(request_type, model, model_redirects) -> None:
+    request = request_type.model_validate(
+        {"model": model, "instructions": "", "input": [], "reasoning": {"effort": "high"}, "service_tier": "priority"}
+    )
+
+    apply_api_key_enforcement(request, None)
+    apply_api_key_enforcement(request, None)
+
+    assert request.model == "gpt-6.1-sol"
+    assert request.reasoning.effort == "high"
+    assert request.service_tier == "priority"
+
+
+@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-5.5", "gpt-6-sol-fast", "GPT-6-SOL", "other-model"])
+def test_configured_redirect_leaves_unmapped_models_unchanged(model, model_redirects) -> None:
+    request = ResponsesRequest.model_validate({"model": model, "instructions": "", "input": []})
+    apply_api_key_enforcement(request, None)
+    assert request.model == model
+
+
+def test_empty_redirects_preserve_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.modules.proxy.request_policy.get_settings", lambda: SimpleNamespace(model_redirects={}))
+    request = ResponsesRequest.model_validate({"model": "gpt-6-sol", "instructions": "", "input": []})
+    apply_api_key_enforcement(request, None)
+    assert request.model == "gpt-6-sol"
+
+
+@pytest.mark.parametrize("allowed_model", ["gpt-6-sol", "gpt-6.1-sol"])
+@pytest.mark.parametrize("requested_model", ["gpt-6-sol", "gpt-6.1-sol"])
+def test_redirect_allowlist_canonicalization(allowed_model, requested_model, model_redirects) -> None:
+    api_key = cast(ApiKeyData, SimpleNamespace(allowed_models=frozenset({allowed_model})))
+    validate_model_access(api_key, requested_model)
+
+
+def test_redirect_does_not_bypass_model_allowlist(model_redirects) -> None:
+    api_key = cast(ApiKeyData, SimpleNamespace(allowed_models=frozenset({"gpt-5.5"})))
+    with pytest.raises(ProxyModelNotAllowed):
+        validate_model_access(api_key, "gpt-6-sol")
+
+
+@pytest.mark.parametrize("enforced_model", ["gpt-6-luna", "gpt-5.5"])
+def test_redirect_retains_key_enforcement(enforced_model, model_redirects) -> None:
+    request = ResponsesRequest.model_validate(
+        {"model": "gpt-6-sol", "instructions": "", "input": [], "reasoning": {"effort": "high"}}
+    )
+    api_key = cast(
+        ApiKeyData,
+        SimpleNamespace(
+            id="redirect-policy",
+            enforced_model=enforced_model,
+            enforced_reasoning_effort="low",
+            enforced_service_tier="priority",
+        ),
+    )
+    apply_api_key_enforcement(request, api_key)
+    assert request.model == model_redirects.get(enforced_model, enforced_model)
+    assert request.reasoning.effort == "low"
+    assert request.service_tier == "priority"
+
+
+def test_redirect_retains_reasoning_allowlist(model_redirects) -> None:
+    request = ResponsesRequest.model_validate(
+        {"model": "gpt-6-sol", "instructions": "", "input": [], "reasoning": {"effort": "high"}}
+    )
+    api_key = cast(
+        ApiKeyData,
+        SimpleNamespace(
+            id="redirect-policy",
+            enforced_model=None,
+            enforced_reasoning_effort=None,
+            enforced_service_tier=None,
+            allowed_reasoning_efforts=["low"],
+        ),
+    )
+    with pytest.raises(ProxyReasoningEffortNotAllowed):
+        apply_api_key_enforcement(request, api_key)
+
+
+def test_redirect_updates_original_chat_model_only(model_redirects) -> None:
+    payload: dict[str, JsonValue] = {
+        "model": "gpt-6-sol",
+        "messages": [],
+        "reasoning_effort": "high",
+        "service_tier": "priority",
+    }
+    apply_api_key_enforcement_to_chat_payload(payload, None)
+    assert payload == {"model": "gpt-6.1-sol", "messages": [], "reasoning_effort": "high", "service_tier": "priority"}
+
+
 @pytest.mark.parametrize(
     ("alias", "canonical", "expected_effort", "expected_service_tier"),
     [

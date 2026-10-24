@@ -232,6 +232,7 @@ DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{DEFAULT_DB_PATH}"
 type StringListInput = str | list[str] | None
 type OptionalStringInput = str | None
 type ModelContextWindowOverridesInput = str | dict[str, int] | None
+type ModelRedirectsInput = str | dict[str, str] | None
 
 
 def _validate_context_window_entries(data: Mapping[str, object]) -> dict[str, int]:
@@ -431,6 +432,8 @@ class Settings(BaseSettings):
     # a ``model_context_window_overrides`` dashboard row wins for its slug; slugs
     # without a row still read this dict.
     model_context_window_overrides: Annotated[dict[str, int], NoDecode] = Field(default_factory=dict)
+    # Deployment-specific upstream model names; exact substitutions, disabled by default.
+    model_redirects: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
     # T1 (topology). Raw socket-peer CIDRs allowed to call the proxy without an
     # API key: a fact of this replica's network namespace (sidecar, pod CIDR),
     # like the trusted-proxy CIDRs below.
@@ -718,6 +721,21 @@ class Settings(BaseSettings):
         if isinstance(value, dict):
             return _validate_context_window_entries(value)
         raise TypeError("model_context_window_overrides must be a JSON object string or dict")
+
+    @field_validator("model_redirects", mode="before")
+    @classmethod
+    def _parse_model_redirects(cls, value: ModelRedirectsInput) -> dict[str, str]:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return {}
+        parsed = json.loads(value) if isinstance(value, str) else value
+        if not isinstance(parsed, dict):
+            raise ValueError("model_redirects must be a JSON object string or dict")
+        for source, target in parsed.items():
+            if not isinstance(source, str) or not source.strip() or not isinstance(target, str) or not target.strip():
+                raise ValueError("model_redirects keys and values must be nonblank strings")
+            if target in parsed:
+                raise ValueError("model_redirects targets must not also be redirect sources")
+        return parsed
 
     @model_validator(mode="after")
     def _apply_data_dir_defaults(self) -> "Settings":

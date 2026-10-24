@@ -6,6 +6,7 @@ from typing import NamedTuple
 
 from pydantic import ValidationError
 
+from app.core.config.settings import get_settings
 from app.core.errors import OpenAIErrorEnvelope, openai_error
 from app.core.exceptions import ProxyModelNotAllowed, ProxyReasoningEffortNotAllowed
 from app.core.openai.exceptions import ClientPayloadError
@@ -265,7 +266,7 @@ def _materialize_provider_reasoning_effort(
 
 def _client_reasoning_effort_from_model(model: str | None) -> str | None:
     alias = _resolve_model_alias_parts(model)
-    if alias is not None:
+    if alias is not None and alias[1] is not None:
         normalized_model = model.strip().lower() if isinstance(model, str) else ""
         suffix = normalized_model[len(alias[0]) + 1 :]
         tokens = {token for token in suffix.split("-") if token}
@@ -572,6 +573,12 @@ def apply_api_key_enforcement_to_chat_payload(
     applied to the outbound dict as well or the upstream receives the
     caller's values while accounting uses the enforced ones.
     """
+    model = payload.get("model")
+    if isinstance(model, str):
+        redirected_model = get_settings().model_redirects.get(model)
+        if redirected_model is not None:
+            payload["model"] = redirected_model
+
     if allowed_reasoning_effort is not None:
         wire_effort = resolve_wire_reasoning_effort(allowed_reasoning_effort)
         # Chat requests can express the same setting through several provider
@@ -703,6 +710,9 @@ def normalize_upstream_model_alias(payload: ResponsesRequest | ResponsesCompactR
 def _resolve_model_alias_parts(model: str | None) -> tuple[str, str | None, str | None, bool] | None:
     if not isinstance(model, str):
         return None
+    redirected_model = get_settings().model_redirects.get(model)
+    if redirected_model is not None:
+        return redirected_model, None, None, False
     normalized = model.strip().lower()
     if not normalized:
         return None
