@@ -141,10 +141,11 @@ function transformSplit(sources, readFile) {
   output.set(adapterAsset, providerHelpers(adapter, adapterAsset, readFile, adapterThread[1]) + replaceOnce(adapter, adapterQuota[0], safeAfter, 'composer adapter quota', changes));
 
   const initialAsset = select('app-initial'), initial = sources.get(initialAsset);
-  const gate = uniqueMatches(initial, new RegExp(`if\\((${ID})\\.requiresFirstPartyInference&&(${ID})\\(${ID},\x60\\d+\x60\\)\\)\\{let ${ID}=\\2\\(${ID},\\{hostId:${ID},cwd:null,failClosed:!0\\}\\),(${ID})=${ID}\\.isError,(${ID})=!\\3&&${ID}\\.data==null,(${ID})=${ID}\\.data==null\\?null:${ID}\\(${ID}\\.data\\.config\\)\\.model_provider;${ID}\\.push\\(\\{isLoading:\\4,isError:\\3,isCapable:!\\4&&!\\3&&\\(\\5\\?\\?\x60openai\x60\\)===\x60openai\x60\\}\\)\\}`, 'g'), 'dictation provider gate');
+  const gate = uniqueMatches(initial, new RegExp(`if\\((${ID})\\.requiresFirstPartyInference&&(${ID})\\(${ID},\x60\\d+\x60\\)\\)\\{let ${ID}=\\2\\(${ID},\\{hostId:${ID},cwd:null,failClosed:!0\\}\\),(${ID})=${ID}\\.isError,(${ID})=!\\3&&${ID}\\.data==null,(${ID})=${ID}\\.data==null\\?null:${ID}\\(${ID}\\.data\\.config\\)\\.model_provider;${ID}\\.push\\(\\{isLoading:\\4,isError:\\3,isCapable:!\\4&&!\\3&&\\(\\5\\?\\?\x60openai\x60\\)===\x60openai\x60\\}\\)\\}`, 'g'), 'capability provider gate');
   const request = uniqueMatches(initial.slice(initial.lastIndexOf('function ', gate.index), gate.index), new RegExp(`Explicit-host capability requires hostId: \\$\\{(${ID})\\.name\\}`, 'g'), 'capability request')[1];
-  const gateAfter = `let codexLbDictation=${request}.name===\x60dictation\x60||${request}.name.startsWith(\x60dictation.\x60);` + gate[0].replace(`(${gate[5]}??\x60openai\x60)===\x60openai\x60`, `((${gate[5]}??\x60openai\x60)===\x60openai\x60||codexLbDictation&&${gate[5]}===\x60codex-lb\x60)`);
-  output.set(initialAsset, replaceOnce(initial, gate[0], gateAfter, 'dictation provider', changes));
+  // Dot navigation and Dot chats share this gate with dictation.
+  const gateAfter = `let codexLbProviderCapability=${request}.name===\x60dictation\x60||${request}.name.startsWith(\x60dictation.\x60)||${request}.name===\x60orbit\x60||${request}.name===\x60orbit.navigation\x60;` + gate[0].replace(`(${gate[5]}??\x60openai\x60)===\x60openai\x60`, `((${gate[5]}??\x60openai\x60)===\x60openai\x60||codexLbProviderCapability&&${gate[5]}===\x60codex-lb\x60)`);
+  output.set(initialAsset, replaceOnce(initial, gate[0], gateAfter, 'dictation and dot provider', changes));
   return { output, changes };
 }
 function transform(source, asset, readFile) {
