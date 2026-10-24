@@ -9,5 +9,5 @@
 - [x] 2.1 Cover bare enforcement, redirects, unmapped models and invalid rules.
 - [x] 2.2 Verify HTTP, WebSocket, compaction, chat and catalog behavior.
 - [x] 2.3 Run focused backend/frontend checks and verify the rendered dashboard.
-- [ ] 2.4 Sync specifications, archive, and commit source changes separately.
-- [ ] 2.5 Deploy the tested source revision and migrate the existing key policy.
+- [x] 2.4 Sync specifications, archive, and commit source changes separately.
+- [x] 2.5 Deploy the tested source revision and migrate the existing key policy.
