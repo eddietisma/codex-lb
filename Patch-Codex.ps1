@@ -3,6 +3,8 @@ Codex-lb patch and launcher. One script; requires the Node.js already installed 
 Default: detect the current Store build, prepare/reuse a patched copy, restart Codex,
 and open your normal profile. Store files are not modified.
 The runtime cache and shortcut icon are stored in Local AppData.
+The sidebar has saved workspaces, each with an explicit list of folders.
+Use All to show everything, + to add a workspace, and Folders to edit its paths.
 -CheckOnly checks compatibility without writing or restarting.
 -PrepareOnly prepares the runtime without closing or launching Codex.
 -NoRestart refuses to launch while another Codex instance is open.
@@ -213,6 +215,350 @@ function transform(source, asset, readFile) {
 return { transform, transformSplit, helper };
 
 })();
+// Keep the workspace UI and matching rules independent of minified app bindings.
+function createWorkspaceFilter(react, jsx, threadAtom, projectKey, chatProjectKey, chatMetadata = () => ({})) {
+  const storageKey = 'codex-lb-sidebar-workspaces-v2';
+  const defaults = { workspaces: [{ name: 'RoarDB', folders: [] }, { name: 'HSB', folders: [] }], active: '' };
+  const listeners = new Set(), cache = new WeakMap();
+  function read() {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey));
+      if (Array.isArray(value?.workspaces) && value.workspaces.every(item => typeof item.name === 'string'
+        && item.name.trim() && Array.isArray(item.folders) && item.folders.every(folder => typeof folder === 'string'))) {
+        return { workspaces: value.workspaces, active: value.workspaces.some(item => item.name === value.active) ? value.active : '' };
+      }
+    } catch {}
+    return defaults;
+  }
+  let state = read();
+  function update(next) {
+    state = next;
+    try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch {}
+    for (const listener of listeners) listener();
+  }
+  if (typeof window !== 'undefined') window.addEventListener('storage', event => {
+    if (event.key !== storageKey && event.key !== null) return;
+    state = read();
+    for (const listener of listeners) listener();
+  });
+  const subscribe = listener => { listeners.add(listener); return () => listeners.delete(listener); };
+  const snapshot = () => state;
+  function useWorkspace() { return react().useSyncExternalStore(subscribe, snapshot, snapshot); }
+  function selectedFolders(current = state) {
+    return current.active ? current.workspaces.find(item => item.name === current.active)?.folders ?? [] : null;
+  }
+  function normalizeFolder(value) {
+    let folder = value.trim().replace(/^"|"$/g, '').replaceAll('\\', '/').replace(/^\/\/\?\//, '');
+    if (/^[a-z]:/i.test(folder) || folder.startsWith('//')) folder = folder.toLowerCase();
+    if (folder !== '/') folder = folder.replace(/\/+$/, '');
+    return folder;
+  }
+  function matches(value, folders = selectedFolders()) {
+    if (folders === null) return true;
+    const roots = folders.map(normalizeFolder).filter(Boolean);
+    const includes = value => {
+      if (typeof value !== 'string') return false;
+      const candidate = normalizeFolder(value);
+      return roots.some(root => candidate === root || (root === '/'
+        ? candidate.startsWith('/') && !candidate.startsWith('//') : candidate.startsWith(root + '/')));
+    };
+    // Only folder metadata participates. Names, repository URLs, and message text do not.
+    const fields = ['cwd', 'path', 'rootPaths', 'sourceWorkspaceRoot', 'root', 'rootFolder', 'repoPath', 'gitRepos',
+      'summary', 'pendingThreadStart', 'pendingWorktree', 'task'];
+    function visit(item, depth = 0) {
+      if (includes(item)) return true;
+      if (!item || typeof item !== 'object' || depth > 6) return false;
+      if (Array.isArray(item)) return item.some(value => visit(value, depth + 1));
+      return fields.some(key => visit(item[key], depth + 1));
+    }
+    return visit(value);
+  }
+  function filterResult(data, scope, paging) {
+    const folders = selectedFolders(useWorkspace());
+    const result = filter(data, scope, folders);
+    react().useEffect(() => {
+      if (!folders?.length || result.layout.chatKeys.length >= 10 || paging.loading || !paging.hasMore) return;
+      let cancelled = false;
+      // Continue through nonmatching history pages, including an initially empty result.
+      Promise.resolve().then(() => { if (!cancelled) return paging.loadMore(); }).catch(() => {});
+      return () => { cancelled = true; };
+    }, [folders, result, paging.loading, paging.hasMore, paging.reader, paging.pageScope]);
+    return result;
+  }
+  function filter(data, scope, folders = selectedFolders()) {
+    if (folders === null) return data;
+    const selection = JSON.stringify(folders);
+    const previous = cache.get(data);
+    const groups = data.codexLbAllProjectGroups ?? [...data.orderedPinnedProjectGroups, ...data.allCodexProjectGroups];
+    const allowedProjects = new Set(), allowedThreads = new Set();
+    for (const group of groups) {
+      if (!matches(group, folders)) continue;
+      allowedProjects.add(projectKey(group.projectId));
+      for (const key of group.threadKeys) allowedThreads.add(key);
+    }
+    for (const item of data.chatGptProjectTargets) {
+      const id = item.project.gizmo.id, linkedId = data.linkedLocalProjectIdByChatGptProjectId.get(id);
+      if (allowedProjects.has(projectKey(linkedId)) || matches(data.codexLbLocalProjects?.[linkedId], folders)) {
+        allowedProjects.add(chatProjectKey(id));
+        for (const key of item.localThreadKeys ?? []) allowedThreads.add(key);
+      }
+    }
+    const conversationByKey = new Map();
+    for (const [key, item] of data.conversationByKey) {
+      const allowed = item.source === 'codex'
+        ? allowedThreads.has(item.threadKey) || matches(scope.get(threadAtom(), item.threadKey), folders)
+        : allowedProjects.has(chatProjectKey(item.target.projectId)) || matches(item.target.conversation, folders);
+      if (allowed) conversationByKey.set(key, item);
+    }
+    // A chat can move folders while the sidebar selector retains the same object.
+    const membership = JSON.stringify([[...allowedProjects], [...conversationByKey.keys()]]);
+    if (previous?.selection === selection && previous.scope === scope && previous.membership === membership) return previous.result;
+    const allowed = key => allowedProjects.has(key) || conversationByKey.has(key);
+    const layout = { ...data.layout };
+    for (const key of ['pinnedKeys', 'projectKeys', 'chatKeys']) layout[key] = layout[key].filter(allowed);
+    for (const key of ['chatAttentionStates', 'projectAttentionStates']) {
+      if (layout[key] instanceof Map) layout[key] = new Map([...layout[key]].filter(([key]) => allowed(key)));
+    }
+    if (Array.isArray(layout.chatAttentionStates)) {
+      layout.chatAttentionStates = layout.chatAttentionStates.filter((_, index) => allowed(data.layout.chatKeys[index]));
+    }
+    if (Array.isArray(layout.projectAttentionStates)) {
+      const projects = new Set(layout.projectKeys);
+      layout.projectAttentionStates = data.entries.filter(item => item.kind === 'conversation' && !item.pinned
+        && projects.has(item.projectKey) && allowed(item.key)).map(item => item.attentionState);
+    }
+    const keepGroup = group => allowedProjects.has(projectKey(group.projectId));
+    const result = { ...data, layout, conversationByKey,
+      entries: data.entries.filter(item => allowed(item.key)),
+      orderedPinnedProjectGroups: data.orderedPinnedProjectGroups.filter(keepGroup),
+      allCodexProjectGroups: data.allCodexProjectGroups.filter(keepGroup),
+      codexProjectGroups: data.codexProjectGroups.filter(keepGroup),
+      chatGptProjectTargets: data.chatGptProjectTargets.filter(item => allowedProjects.has(chatProjectKey(item.project.gizmo.id))),
+    };
+    cache.set(data, { selection, scope, membership, result });
+    return result;
+  }
+  function Controls() {
+    const React = react(), h = jsx().jsx, current = useWorkspace();
+    const [editing, setEditing] = React.useState(null), [name, setName] = React.useState('');
+    const [paths, setPaths] = React.useState(''), [error, setError] = React.useState('');
+    const selected = current.workspaces.find(item => item.name === current.active);
+    const edit = workspace => { setEditing(workspace.name); setPaths(workspace.folders.join('\n')); setError(''); };
+    const inputStyle = { minWidth: 0, width: '100%', boxSizing: 'border-box', color: 'inherit',
+      background: 'transparent', border: '1px solid #8886', borderRadius: 6, padding: 6, font: 'inherit' };
+    const actionStyle = { border: '1px solid #8886', borderRadius: 6, padding: '4px 8px', background: 'transparent',
+      color: 'inherit', font: 'inherit', cursor: 'pointer' };
+    const button = (label, active, onClick, extra = {}) => h('button', {
+      type: 'button', onClick, ...extra,
+      style: { flexShrink: 0, border: '1px solid var(--border-color, #6666)', borderRadius: 999,
+        padding: '4px 10px', background: active ? 'var(--color-token-bg-secondary, #8883)' : 'transparent',
+        color: 'inherit', font: 'inherit', cursor: 'pointer', fontWeight: active ? 600 : 400 }, children: label,
+    }, label);
+    return h('div', { 'data-codex-lb-workspaces': true, style: { minWidth: 0, padding: '8px 12px' }, children: [
+      h('div', { role: 'group', 'aria-label': 'Workspace filter',
+        style: { display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', touchAction: 'pan-x', paddingBottom: 3 },
+        onWheel: event => { if (event.deltaY && !event.deltaX) event.currentTarget.scrollLeft += event.deltaY; },
+        children: [button('All', !current.active, () => { update({ ...current, active: '' }); setEditing(null); }, { 'aria-pressed': !current.active }),
+          ...current.workspaces.map(workspace => button(workspace.name, current.active === workspace.name, () => {
+            update({ ...current, active: workspace.name });
+            workspace.folders.length ? setEditing(null) : edit(workspace);
+          }, { 'aria-pressed': current.active === workspace.name })),
+          button('+', editing === true, () => { setEditing(editing === true ? null : true); setName(''); setError(''); },
+            { 'aria-label': 'Add workspace', title: 'Add workspace' })],
+      }, 'tabs'),
+      selected && editing !== selected.name ? h('button', { type: 'button', onClick: () => edit(selected),
+        style: { marginTop: 5, font: 'inherit', color: 'inherit', background: 'transparent', border: 0, cursor: 'pointer' },
+        children: 'Folders (' + selected.folders.length + ')' }, 'folders') : null,
+      editing === true ? h('form', { style: { display: 'flex', gap: 6, marginTop: 6 }, onSubmit: event => {
+        event.preventDefault();
+        const trimmed = name.trim();
+        if (!trimmed || trimmed.toLowerCase() === 'all') return;
+        const existing = current.workspaces.find(item => item.name.toLowerCase() === trimmed.toLowerCase());
+        const workspace = existing ?? { name: trimmed, folders: [] };
+        update({ workspaces: existing ? current.workspaces : [...current.workspaces, workspace], active: workspace.name });
+        setName(''); edit(workspace);
+      }, children: [h('input', { autoFocus: true, 'aria-label': 'Workspace name', placeholder: 'Workspace name',
+        value: name, maxLength: 80, onChange: event => setName(event.target.value),
+        onKeyDown: event => { if (event.key === 'Escape') setEditing(null); }, style: inputStyle,
+      }, 'name'), h('button', { type: 'submit', style: actionStyle, children: 'Add' }, 'add'),
+      ] }, 'new') : null,
+      typeof editing === 'string' ? h('form', { style: { marginTop: 6 }, onSubmit: event => {
+        event.preventDefault();
+        const folders = [...new Set(paths.split(/\r?\n/).map(value => value.trim().replace(/^"|"$/g, '')).filter(Boolean))];
+        if (folders.some(folder => !/^(?:[a-z]:(?:[\\/]|$)|[\\/])/i.test(folder))) {
+          setError('Use full folder paths, such as F:\\HSB.'); return;
+        }
+        update({ ...current, workspaces: current.workspaces.map(item => item.name === editing ? { ...item, folders } : item) });
+        setEditing(null); setError('');
+      }, children: [h('label', { style: { display: 'block', fontSize: 12, marginBottom: 5 }, children: [
+        h('span', { children: 'Folders for ' + editing }, 'title'),
+        h('textarea', { autoFocus: true, rows: 5, 'aria-label': 'Workspace folders', value: paths,
+          placeholder: 'F:\\HSB\nF:\\PLAT-387\nF:\\PLAT-370', onChange: event => setPaths(event.target.value),
+          style: { ...inputStyle, display: 'block', resize: 'vertical', marginTop: 5 },
+        }, 'paths'),
+      ] }, 'label'), h('div', { style: { fontSize: 12, opacity: 0.7, marginBottom: 6 },
+        children: 'One folder per line. Includes subfolders.' }, 'hint'),
+        error ? h('div', { role: 'alert', children: error }, 'error') : null,
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8 }, children: [h('button', { type: 'submit', style: actionStyle, children: 'Save' }, 'save'),
+          h('button', { type: 'button', style: actionStyle, onClick: () => setEditing(null), children: 'Cancel' }, 'cancel'),
+          h('button', { type: 'button', style: actionStyle, 'aria-label': 'Remove workspace ' + editing, onClick: () => {
+            update({ workspaces: current.workspaces.filter(item => item.name !== editing), active: '' }); setEditing(null);
+          }, children: 'Remove workspace' }, 'remove')],
+        }, 'actions')],
+      }, 'edit') : null,
+    ] });
+  }
+  function withControls(props) {
+    const h = jsx().jsx;
+    return { ...props, topContent: h(react().Fragment, { children: [h(Controls, {}, 'workspaces'),
+      h(react().Fragment, { children: props.topContent }, 'original')] }) };
+  }
+  function filterNative(data, scope) {
+    const folders = selectedFolders(useWorkspace());
+    const threadKeys = [...new Set(['threadKeys', 'chatSectionThreadKeys', 'pinnedProjectThreadKeys', 'navigationThreadKeys', 'shortcutThreadKeys']
+      .flatMap(key => data[key] ?? []).concat(data.projectGroups.flatMap(group => group.threadKeys),
+        data.connectionGroups?.flatMap(group => group.threadKeys) ?? []))];
+    const matchingThreads = new Set(folders === null ? [] : threadKeys.filter(key => matches(scope.get(threadAtom(), key), folders)));
+    const membership = JSON.stringify([...matchingThreads]);
+    return react().useMemo(() => {
+      if (folders === null) return data;
+      const allowedThreads = new Set();
+      const projectGroups = data.projectGroups.filter(group => {
+        if (!matches(group, folders)) return false;
+        for (const key of group.threadKeys) allowedThreads.add(key);
+        return true;
+      });
+      const allowed = key => allowedThreads.has(key) || matchingThreads.has(key);
+      const result = { ...data, projectGroups };
+      for (const key of ['threadKeys', 'chatSectionThreadKeys', 'pinnedProjectThreadKeys', 'navigationThreadKeys', 'shortcutThreadKeys']) {
+        if (data[key]) result[key] = data[key].filter(allowed);
+      }
+      if (data.connectionGroups) result.connectionGroups = data.connectionGroups.map(group => ({ ...group,
+        threadKeys: group.threadKeys.filter(allowed),
+      })).filter(group => group.threadKeys.length);
+      return result;
+    }, [data, scope, folders, membership]);
+  }
+  function filterPriority(items, scope) {
+    const folders = selectedFolders(useWorkspace());
+    function allowed(item) {
+      if (item.kind === 'task') return matches(item.threadEntry, folders) || matches(item.projectGroup, folders)
+        || matches(scope.get(threadAtom(), item.threadEntry.key), folders);
+      const metadata = chatMetadata(scope, item);
+      return matches(item.conversation, folders) || matches(metadata.localProjects, folders);
+    }
+    const membership = folders === null || items == null ? '' : JSON.stringify(items.map(item =>
+      item.items ? item.items.map(allowed) : allowed(item)));
+    return react().useMemo(() => {
+      if (folders === null || items == null) return items;
+      return items.flatMap(item => {
+        if (!item.items) return allowed(item) ? [item] : [];
+        const visible = item.items.filter(allowed);
+        return visible.length ? [{ ...item, items: visible }] : [];
+      });
+    }, [items, scope, folders, membership]);
+  }
+  return { filterResult, filter, filterNative, filterPriority, matches, withControls, Controls,
+    active: () => JSON.stringify([state.active, selectedFolders()]) };
+}
+function transformWorkspaces(source) {
+  const changes = [], ID = '[A-Za-z_$][\\w$]*';
+  function one(pattern, label) {
+    const found = [...source.matchAll(pattern)];
+    assert.equal(found.length, 1, 'Unsupported app layout: ' + label);
+    return found[0];
+  }
+  const selector = one(new RegExp(`(${ID})=(${ID})\\((${ID}),(${ID})\\),\\{orderedPinnedProjectGroups:`, 'g'), 'unified sidebar selector');
+  const start = source.lastIndexOf('function ', selector.index);
+  const scope = source.slice(start, selector.index).match(new RegExp(`(${ID})=(${ID})\\((${ID})\\),\\{accountId:`));
+  assert(scope, 'Unsupported app layout: sidebar scope');
+  const sidebar = source.slice(start, selector.index);
+  const catalog = sidebar.match(new RegExp(`(${ID})!=null&&(${ID})!=null\\?\\1\\.getPageState\\(\\2\\)`));
+  const pageState = sidebar.match(new RegExp(`(${ID})=\\(0,${ID}\\.useSyncExternalStore\\)`));
+  // Resolve the ChatGPT history hook directly instead of relying on unrelated locals.
+  const historyCall = sidebar.match(new RegExp(`let (${ID})=(${ID})\\((${ID})\\),${ID};(?=.*?chatTargets:)`));
+  assert(catalog && pageState && historyCall, 'Unsupported app layout: sidebar history paging');
+  const navigation = one(new RegExp(`let (${ID})=${ID}\\.get\\((${ID}),${ID}\\.threadKey\\);${ID}\\(${ID},${ID}\\.threadKey,`, 'g'), 'sidebar thread metadata');
+  const project = one(new RegExp(`for\\(let (${ID}) of ${ID}\\?\\[\\.\\.\\.${ID},\\.\\.\\.${ID}\\]:\\[\\]\\)${ID}\\.set\\((${ID})\\(\\1\\.projectId\\),\\{source:\x60codex\x60,group:\\1\\}\\);for\\(let (${ID}) of ${ID}\\)${ID}\\.set\\((${ID})\\(\\3\\.project\\.gizmo\\.id\\)`, 'g'), 'sidebar project keys');
+  const container = one(new RegExp(`function (${ID})\\((${ID})\\)\\{let ${ID}=\\(0,${ID}\\.c\\)\\(\\d+\\),\\{activeThreadKey:${ID},activeThreadIsPinned:${ID},handleSidebarScroll:`, 'g'), 'sidebar container');
+  const containerStart = source.indexOf('}var ', container.index);
+  const containerCode = source.slice(container.index, containerStart);
+  const reactOwner = containerCode.match(new RegExp(`\\(0,(${ID})\\.useRef\\)`))?.[1];
+  assert(reactOwner, 'Unsupported app layout: sidebar React');
+  const reactFactory = one(new RegExp(`${reactOwner}=(${ID})\\(\\)`, 'g'), 'sidebar React factory')[1];
+  const jsxOwner = containerCode.match(new RegExp(`\\(0,(${ID})\\.jsx\\)`))?.[1];
+  assert(jsxOwner, 'Unsupported app layout: sidebar JSX');
+  const jsxFactory = one(new RegExp(`${jsxOwner}=(${ID})\\(\\)`, 'g'), 'sidebar JSX factory')[1];
+  const before = selector[0], after = `${selector[1]}=codexLbWorkspace.filterResult(${selector[2]}(${selector[3]},${selector[4]}),${scope[1]},{reader:${catalog[1]},pageScope:${catalog[2]},hasMore:${pageState[1]}.hasMore||${historyCall[1]}.canFetchNextConversationPage,loading:${pageState[1]}.isLoading||${historyCall[1]}.isFetchingNextConversationPage,loadMore:()=>Promise.all([${pageState[1]}.hasMore?${catalog[1]}?.loadMore(${catalog[2]},50):void 0,${historyCall[1]}.canFetchNextConversationPage?${historyCall[1]}.fetchNextConversationPage(50):void 0])}),{orderedPinnedProjectGroups:`;
+  source = source.replace(before, after);
+  changes.push({ name: 'workspace sidebar filtering', before, after });
+  const containerAfter = container[0].replace('{let ', `{${container[2]}=codexLbWorkspace.withControls(${container[2]});let `);
+  source = source.replace(container[0], containerAfter);
+  changes.push({ name: 'workspace sidebar tabs', before: container[0], after: containerAfter });
+  const sidebarAt = source.lastIndexOf('function ', source.indexOf('codexLbWorkspace.filterResult('));
+  const sidebarEnd = source.indexOf('}function ', sidebarAt) + 1;
+  const originalSidebar = source.slice(sidebarAt, sidebarEnd);
+  // Unread retention and deferred project state belong to the selected workspace.
+  source = source.replace(originalSidebar, originalSidebar.replaceAll('JSON.stringify([', 'JSON.stringify([codexLbWorkspace.active(),'));
+  // Both sidebar parents use this native list for connection groups and shortcuts.
+  const sidebarBody = source.slice(start, source.indexOf('}function ', selector.index));
+  const connectionOwner = sidebarBody.match(new RegExp(`(${ID})\\.connectionGroups`))?.[1];
+  const connection = sidebar.match(new RegExp(`(${connectionOwner})=${selector[2]}\\((${ID}),${ID}\\)`));
+  assert(connection, 'Unsupported app layout: native sidebar selector');
+  const calls = [...source.matchAll(new RegExp(`(${ID})=${selector[2]}\\(${connection[2]},(${ID}|\x60codex\x60)\\)`, 'g'))];
+  assert.equal(calls.length, 3, 'Unsupported app layout: native sidebar parents');
+  for (const call of calls) {
+    const at = source.indexOf(call[0]);
+    const functionAt = source.lastIndexOf('function ', at), head = source.slice(functionAt, at);
+    let parentScope = head.match(new RegExp(`(${ID})=${scope[2]}\\(${scope[3]}\\)`))?.[1];
+    if (!parentScope) {
+      parentScope = 'codexLbPriorityScope';
+      const brace = source.indexOf('{', functionAt);
+      source = source.slice(0, brace + 1) + `let ${parentScope}=${scope[2]}(${scope[3]});` + source.slice(brace + 1);
+    }
+    source = source.replace(call[0], `${call[1]}=codexLbWorkspace.filterNative(${selector[2]}(${connection[2]},${call[2]}),${parentScope})`);
+  }
+  const priority = one(new RegExp(`${ID}=${selector[2]}\\((${ID}),(${ID})\\),${ID}=${ID}\\(${ID}\\)\\?\\?!0,${ID}=${ID}\\(${ID}\\),${ID}=${selector[2]}\\((${ID}),\\2\\),${ID}=${selector[2]}\\((${ID}),\\2\\)`, 'g'), 'priority sidebar lists');
+  const shortcuts = one(new RegExp(`(${ID})=${selector[2]}\\((${ID}),${ID}\\);if\\(!${ID}\\|\\|\\1==null\\)return null`, 'g'), 'priority sidebar shortcuts');
+  const priorityCalls = [...source.matchAll(new RegExp(`${selector[2]}\\((${[priority[1], priority[3], priority[4], shortcuts[2]].join('|')}),(${ID}|\x60codex\x60)\\)`, 'g'))];
+  assert.equal(priorityCalls.length, 9, 'Unsupported app layout: priority sidebar consumers');
+  for (let index = priorityCalls.length - 1; index >= 0; index--) {
+    const call = priorityCalls[index];
+    source = source.slice(0, call.index) + `codexLbPriorityCall${index}` + source.slice(call.index + call[0].length);
+  }
+  for (const [index, call] of priorityCalls.entries()) {
+    const placeholder = `codexLbPriorityCall${index}`;
+    const at = source.indexOf(placeholder), functionAt = source.lastIndexOf('function ', at);
+    let parentScope = source.slice(functionAt, at).match(new RegExp(`(${ID})=${scope[2]}\\(${scope[3]}\\)`))?.[1];
+    if (!parentScope) {
+      parentScope = 'codexLbPriorityScope';
+      const brace = source.indexOf('{', functionAt);
+      source = source.slice(0, brace + 1) + `let ${parentScope}=${scope[2]}(${scope[3]});` + source.slice(brace + 1);
+    }
+    source = source.replace(placeholder, `codexLbWorkspace.filterPriority(${call[0]},${parentScope})`);
+  }
+  const localReads = [...source.matchAll(new RegExp(`(${ID})\\(${ID}\\.get,(${ID})\\.LOCAL_PROJECTS\\)`, 'g'))];
+  const localBindings = [...new Set(localReads.map(match => `${match[1]}|${match[2]}`))];
+  assert.equal(localBindings.length, 1, 'Unsupported app layout: configured local projects');
+  const [localRead, configKeys] = localBindings[0].split('|');
+  const chatAtoms = [...source.matchAll(new RegExp(`(${ID})=${selector[2]}\\((${ID}),${ID}\\),${ID}=${selector[2]}\\((${ID}),${ID}\\?\\?\\1\\?\\?null\\)`, 'g'))];
+  const chatBindings = [...new Set(chatAtoms.map(match => `${match[2]}|${match[3]}`))];
+  assert.equal(chatBindings.length, 1, 'Unsupported app layout: ChatGPT project metadata');
+  const [conversationProject, projectAtom] = chatBindings[0].split('|');
+  const metadata = `(scope,item)=>{let id=item.conversation?.gizmo_id??scope.get(${conversationProject},item.conversation?.id??item.conversationId);return{project:id==null?null:scope.get(${projectAtom},id),localProjects:id==null?[]:Object.values(${localRead}(scope.get,${configKeys}.LOCAL_PROJECTS)??{}).filter(project=>project.chatGptBacking?.projectId===id)}}`;
+  const helper = `const codexLbWorkspace=(${createWorkspaceFilter.toString()})(()=>${reactFactory}(),()=>${jsxFactory}(),()=>${navigation[2]},id=>${project[2]}(id),id=>${project[4]}(id),${metadata});`;
+  changes.push({ name: 'workspace priority filtering', before: priority[0], after: 'workspace-filtered priority lists and shortcuts' });
+  return { code: helper + source, changes };
+}
+function transformWorkspaceMetadata(source) {
+  const ID = '[A-Za-z_$][\\w$]*';
+  const metadata = [...source.matchAll(new RegExp(`localProjects:(${ID}),resolvedProjectsWithThreads:\\[\\.\\.\\.(${ID}),\\.\\.\\.(${ID})\\.projectGroups\\]`, 'g'))];
+  assert.equal(metadata.length, 1, 'Unsupported app layout: workspace repository metadata');
+  const before = 'orderedPinnedProjectGroups:';
+  assert.equal(source.split(before).length, 2, 'Unsupported app layout: workspace project result');
+  const after = `codexLbLocalProjects:${metadata[0][1]},codexLbAllProjectGroups:[...${metadata[0][2]},...${metadata[0][3]}.projectGroups],` + before;
+  return { code: source.replace(before, after), changes: [{ name: 'workspace repository metadata', before, after }] };
+}
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 function hashFile(file) {
   const fd = fs.openSync(file, 'r'), chunk = Buffer.alloc(4194304), hash = crypto.createHash('sha256');
@@ -268,6 +614,14 @@ function analyze(appDir) {
       output = new Map([[assets[0], transformed.code]]);
       changes = transformed.changes;
     }
+    const workspace = transformWorkspaces(output.get(assets[0]) ?? readFile(assets[0]));
+    output.set(assets[0], workspace.code);
+    changes.push(...workspace.changes);
+    const initialAssets = [...archive.entries.keys()].filter(key => /^webview\/assets\/app-initial-[^/]+\.js$/.test(key));
+    assert.equal(initialAssets.length, 1, 'Unsupported app layout: workspace metadata bundle');
+    const metadata = transformWorkspaceMetadata(output.get(initialAssets[0]) ?? readFile(initialAssets[0]));
+    output.set(initialAssets[0], metadata.code);
+    changes.push(...metadata.changes);
     const modifications = new Map();
     for (const [asset, code] of output) {
       const original = archive.read(asset);
@@ -416,7 +770,7 @@ if (true) {
     else console.log(JSON.stringify(build(source, output), null, 2));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
-module.exports = { analyze, build, cached, openArchive };
+module.exports = { analyze, build, cached, openArchive, createWorkspaceFilter, transformWorkspaces };
 '@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
