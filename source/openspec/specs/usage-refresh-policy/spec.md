@@ -2224,7 +2224,6 @@ Account probes without an explicit model MUST use the same ordered registry sele
 - **WHEN** neither candidate has plan visibility without suppression
 - **THEN** the selected host is `gpt-5.6-luna` and existing downstream error handling applies
 
-
 ### Requirement: Confirmed reset-credit refresh may release the quota block it reset
 
 A forced usage refresh triggered by an upstream reset-credit redemption MUST receive the time the redemption request was started, read before the consume request is sent, and only when upstream reports `code == "reset"` and `windows_reset > 0`. The refresh MUST bypass a `RATE_LIMITED` account's persisted cooldown deadline only when all of the following hold: the whole second of `blocked_at` precedes that start time; the account's persisted `reset_at` matches, within five seconds, the baseline reset deadline of exactly one quota window, where the baseline is captured before the consume request is sent and includes only rows from the newest usage fetch; and the fresh usage snapshot reports that window with a reset deadline more than five seconds away from its baseline deadline. After the bypass, the existing quota availability checks MUST still apply. In every other case the account MUST remain rate-limited until its cooldown ends. This exception MUST NOT change `QUOTA_EXCEEDED` recovery or ordinary usage refresh behavior.
@@ -2290,3 +2289,25 @@ A forced usage refresh triggered by an upstream reset-credit redemption MUST rec
 - **WHEN** upstream confirms a reset whose window is bound to the block
 - **AND** the forced usage refresh still reports the primary quota at 100 percent
 - **THEN** the account remains `RATE_LIMITED`
+
+### Requirement: Historical recovery uses a consistent post-block time fence
+
+Historical quota-reset recovery SHALL use whole-second precision for the post-block baseline fence. Same-second samples MUST NOT establish a recovery baseline or prevent selection of a later valid baseline. Same-second matching samples MUST still count toward window ambiguity. Existing deadline anchoring, reset confirmation, cooldown, availability, and compare-and-set checks SHALL remain in effect.
+
+#### Scenario: Same-second sample precedes a valid weekly baseline
+- **GIVEN** a Pro 200 account has a future persisted weekly block
+- **AND** history contains a matching exhausted sample in the block's second followed by a matching sample in a later second
+- **AND** subsequent history proves the same weekly quota reset and remains available
+- **WHEN** the background scheduler refreshes and reconciles that account
+- **THEN** it selects the later baseline and clears the stale block
+
+#### Scenario: Only same-second samples match the block
+- **GIVEN** only samples in the block's second match its deadline
+- **WHEN** historical recovery evaluates a later quota reset
+- **THEN** the persisted block remains in effect
+
+#### Scenario: Another slot matches only in the block's second
+- **GIVEN** a weekly primary reset has a valid later baseline
+- **AND** another exhausted slot shares the block's deadline only in its same second
+- **WHEN** historical recovery evaluates the reset
+- **THEN** the ambiguous deadline keeps the account blocked
