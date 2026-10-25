@@ -4,8 +4,8 @@ services:
       context: ./source
       dockerfile: ../Dockerfile
       args:
-        CODEX_LB_SOURCE_REVISION: 7a5bc7f8218cbdde56555c9ace1b87ce86e3c221
-    image: codex-lb:key-redirect-gui-7a5bc7f8
+        CODEX_LB_SOURCE_REVISION: 04260918176463c47b9b9ab24c76c0f24b43c2ec
+    image: codex-lb:reset-baseline-04260918
     container_name: codex-lb
     environment:
       CODEX_LB_DATABASE_URL: postgresql+asyncpg://codex_lb:${POSTGRES_PASSWORD}@postgres:5432/codex_lb
