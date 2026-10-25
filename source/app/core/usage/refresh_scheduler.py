@@ -622,6 +622,16 @@ async def _resolve_reset_evidence(
             # slot has not reset -- and that unreset slot may be the exhausted
             # one that produced the 429.
             matching_slots += 1
+            # Same-second rows still count toward slot ambiguity, but cannot
+            # establish a baseline under recovery's whole-second time fence.
+            baseline = _matching_baseline(
+                history,
+                expected_reset_at=account.reset_at,
+                reset_at_tolerance_seconds=_BLOCK_RESET_MATCH_TOLERANCE_SECONDS,
+                recorded_after=account.blocked_at,
+            )
+            if baseline is None:
+                continue
             transition = _latest_confirmed_reset_transition_from(history, baseline)
             if transition is not None:
                 anchored = transition
@@ -637,6 +647,7 @@ def _matching_baseline(
     *,
     expected_reset_at: int,
     reset_at_tolerance_seconds: int,
+    recorded_after: int | None = None,
 ) -> tuple[int, UsageHistory] | None:
     """Return the earliest row whose reset deadline matches the persisted marker."""
 
@@ -644,7 +655,9 @@ def _matching_baseline(
         (
             (index, entry)
             for index, entry in enumerate(history)
-            if entry.reset_at is not None and abs(entry.reset_at - expected_reset_at) <= reset_at_tolerance_seconds
+            if entry.reset_at is not None
+            and abs(entry.reset_at - expected_reset_at) <= reset_at_tolerance_seconds
+            and (recorded_after is None or naive_utc_to_epoch(entry.recorded_at) > recorded_after)
         ),
         None,
     )
