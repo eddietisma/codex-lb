@@ -89,7 +89,8 @@ function providerHelpers(source, asset, readFile, readHook) {
     new RegExp(`(${ID})=${ID}\\(${ID},\\(\\{cwd:(${ID})=null,hostId:(${ID})\\},\\{get:${ID},queryClient:${ID},scope:${ID}\\}\\)=>${ID}\\(\\{scope:${ID},queryClient:${ID},hostId:\\3,cwd:\\2,enabled:`, 'g'), 'effective config query', imports);
   const provider = importedSelector(source, asset, readFile,
     new RegExp(`(${ID})=${ID}\\(\\(\\{summary:(${ID})\\}\\)=>\\2\\.modelProvider\\|\\|null\\)`, 'g'), 'thread provider atom', imports);
-  return [...imports].join('') + helper + `function codexLbExternalThread(thread,host){let target=${readHook}(${target},thread),config=${readHook}(${config},{cwd:target.cwd,hostId:host}),provider=${readHook}(${provider},thread);return target.hostId===host&&codexLbUsesExternalUsage(provider??config.data?.model_provider)}`;
+  // A new remote draft has no thread ID, so its thread host still defaults to local.
+  return [...imports].join('') + helper + `function codexLbExternalThread(thread,host){let target=${readHook}(${target},thread),config=${readHook}(${config},{cwd:target.cwd,hostId:thread==null?target.hostId:host}),provider=${readHook}(${provider},thread);return (thread==null||target.hostId===host)&&codexLbUsesExternalUsage(provider??config.data?.model_provider)}`;
 }
 function importAlias(source, symbol, destination) {
   const origin = bindings(source, 'import').flatMap(clause => clause.names.filter(name => name.local === symbol).map(name => ({ file: clause.file, name: name.original })));
