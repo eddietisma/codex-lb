@@ -140,7 +140,14 @@ function transformSplit(sources, readFile) {
   const adapterAfter = adapterQuota[0].replace(`${adapterQuota[2]}=${adapterQuota[3]}(`, `codexLbExternal=codexLbExternalThread(${adapterThread[2]},${adapterQuota[4]}),${adapterQuota[2]}=!codexLbExternal&&${adapterQuota[3]}(`);
   // The query hook must run even when codex-lb is selected.
   const safeAfter = adapterAfter.replace(`!codexLbExternal&&${adapterQuota[3]}(${adapterQuota[4]}===\x60local\x60&&${quotaAtom})`, `${adapterQuota[3]}(${adapterQuota[4]}===\x60local\x60&&${quotaAtom})&&!codexLbExternal`);
-  output.set(adapterAsset, providerHelpers(adapter, adapterAsset, readFile, adapterThread[1]) + replaceOnce(adapter, adapterQuota[0], safeAfter, 'composer adapter quota', changes));
+  const hostQuotaAtom = importedSelector(adapter, adapterAsset, readFile,
+    new RegExp(`(${ID})=${ID}\\(${ID},\\((${ID}),\\{get:(${ID})\\}\\)=>\\3\\((${ID}),\\2\\)\\.hardBlocked\\)`, 'g'), 'host account quota');
+  const hostQuota = uniqueMatches(head, new RegExp(`(${ID})=${escape(adapterThread[1])}\\(${escape(hostQuotaAtom)},${escape(adapterQuota[4])}\\)`, 'g'), 'composer host account quota');
+  const submitQuota = uniqueMatches(adapter, new RegExp(`\\|\\|${escape(hostQuota[1])}\\|\\|${escape(adapterQuota[2])},`, 'g'), 'composer submit quota');
+  let adapterCode = replaceOnce(adapter, adapterQuota[0], safeAfter, 'composer adapter quota', changes);
+  // The host account quota also blocks remote Send independently of workspace usage.
+  adapterCode = replaceOnce(adapterCode, submitQuota[0], `||(${hostQuota[1]}&&!codexLbExternal)||${adapterQuota[2]},`, 'composer submit account quota', changes);
+  output.set(adapterAsset, providerHelpers(adapter, adapterAsset, readFile, adapterThread[1]) + adapterCode);
 
   const initialAsset = select('app-initial'), initial = sources.get(initialAsset);
   const gate = uniqueMatches(initial, new RegExp(`if\\((${ID})\\.requiresFirstPartyInference&&(${ID})\\(${ID},\x60\\d+\x60\\)\\)\\{let ${ID}=\\2\\(${ID},\\{hostId:${ID},cwd:null,failClosed:!0\\}\\),(${ID})=${ID}\\.isError,(${ID})=!\\3&&${ID}\\.data==null,(${ID})=${ID}\\.data==null\\?null:${ID}\\(${ID}\\.data\\.config\\)\\.model_provider;${ID}\\.push\\(\\{isLoading:\\4,isError:\\3,isCapable:!\\4&&!\\3&&\\(\\5\\?\\?\x60openai\x60\\)===\x60openai\x60\\}\\)\\}`, 'g'), 'capability provider gate');
