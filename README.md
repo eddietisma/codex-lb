@@ -8,6 +8,8 @@ Local fixes preserve developer context and prewarm replay safety, recognize the 
 
 The upstream license and attribution files are retained in `source/`. The previous local clone remains under ignored `codex-lb/` for access to its original Git history. Edit `source/` for future changes.
 
+For native model catalogue discovery, set `api_key_model_discovery = true` under `[features]` in the client's `config.toml` and set `model_catalog_url` under `[model_providers.codex-lb]` to the LB's `/backend-api/codex/models` endpoint. Restart Codex after enabling discovery. Context window values then come from the LB's Model catalogue settings; no Desktop catalogue patch or numeric client context override is needed.
+
 ## Run locally
 
 Copy `.env.example` to `.env`, set a strong PostgreSQL password, then run:

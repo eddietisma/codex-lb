@@ -547,17 +547,6 @@ function transformWorkspaces(source) {
   changes.push({ name: 'workspace priority filtering', before: priority[0], after: 'workspace-filtered priority lists and shortcuts' });
   return { code: helper + source, changes };
 }
-function transformCatalogDiscovery(source) {
-  const method = [...source.matchAll(/async sendEnablement\(([A-Za-z_$][\w$]*),[A-Za-z_$][\w$]*\)\{let [A-Za-z_$][\w$]*=await this\.evaluations\.readExecutionAssignments\(\);/g)];
-  const enabled = [...source.matchAll(/([A-Za-z_$][\w$]*)\.codex_apps_mcp_2026_07_28=!0,/g)];
-  assert.equal(method.length, 1, 'Unsupported app layout: model discovery enablement');
-  assert.equal(enabled.length, 1, 'Unsupported app layout: model discovery feature flags');
-  assert(method[0].index < enabled[0].index, 'Unsupported app layout: model discovery ordering');
-  const connection = method[0][1] + '.connection';
-  const before = enabled[0][0];
-  const after = `if(${connection}.hostId===\`local\`){const{config:codexLbCatalogConfig}=await ${connection}.sendAppServerRequest(\`config/read\`,{includeLayers:!1});if(codexLbCatalogConfig.model_provider===\`codex-lb\`&&typeof codexLbCatalogConfig.model_providers?.[\`codex-lb\`]?.model_catalog_url===\`string\`&&codexLbCatalogConfig.model_providers[\`codex-lb\`].model_catalog_url.trim()!==\`\`)${enabled[0][1]}.api_key_model_discovery=!0;}${before}`;
-  return { code: source.replace(before, after), changes: [{ name: 'keep explicit CodexLB catalog discovery enabled' }] };
-}
 function transformWorkspaceMetadata(source) {
   const ID = '[A-Za-z_$][\\w$]*';
   const metadata = [...source.matchAll(new RegExp(`localProjects:(${ID}),resolvedProjectsWithThreads:\\[\\.\\.\\.(${ID}),\\.\\.\\.(${ID})\\.projectGroups\\]`, 'g'))];
@@ -630,11 +619,6 @@ function analyze(appDir) {
     const metadata = transformWorkspaceMetadata(output.get(initialAssets[0]) ?? readFile(initialAssets[0]));
     output.set(initialAssets[0], metadata.code);
     changes.push(...metadata.changes);
-    const mainAssets = [...archive.entries.keys()].filter(key => /^\.vite\/build\/main-[^/]+\.js$/.test(key));
-    assert.equal(mainAssets.length, 1, 'Unsupported app layout: main catalog discovery bundle');
-    const mainCatalog = transformCatalogDiscovery(readFile(mainAssets[0]));
-    output.set(mainAssets[0], mainCatalog.code);
-    changes.push(...mainCatalog.changes);
     const modifications = new Map();
     for (const [asset, code] of output) {
       const original = archive.read(asset);
@@ -783,7 +767,7 @@ if (true) {
     else console.log(JSON.stringify(build(source, output), null, 2));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
-module.exports = { analyze, build, cached, openArchive, createWorkspaceFilter, transformWorkspaces, transformCatalogDiscovery };
+module.exports = { analyze, build, cached, openArchive, createWorkspaceFilter, transformWorkspaces };
 '@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
