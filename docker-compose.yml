@@ -4,8 +4,8 @@ services:
       context: ./source
       dockerfile: ../Dockerfile
       args:
-        CODEX_LB_SOURCE_REVISION: c2a7bb600e051eefdc04d1a9e3646e0a569a6db1
-    image: codex-lb:bootstrap-gpt61-c2a7bb60
+        CODEX_LB_SOURCE_REVISION: c617610a8abefc36ed70680ef345f0658b5f6230
+    image: codex-lb:quota-owner-c617610a
     container_name: codex-lb
     environment:
       CODEX_LB_DATABASE_URL: postgresql+asyncpg://codex_lb:${POSTGRES_PASSWORD}@postgres:5432/codex_lb

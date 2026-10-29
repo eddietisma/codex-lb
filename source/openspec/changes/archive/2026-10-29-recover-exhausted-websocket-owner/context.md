@@ -16,3 +16,9 @@ For example, if account A exhausts quota after a chat's last response and accoun
 - Strict validation of this OpenSpec change passed. Normal validation of all 68 existing specifications passed. Repository-wide strict mode reports existing requirement-length warnings, including in untouched specifications.
 
 The integration run used `--rootdir=tests --confcutdir=tests --import-mode=importlib` because pytest's default root scan encounters an inaccessible `.claude` link on this Windows checkout. Test logs remain under `E:/.tmp/20261029-codexlb-quota-*`.
+
+## Deployment on 2026-10-29
+
+The local Docker deployment runs `codex-lb:quota-owner-c617610a`, built from source revision `c617610a8abefc36ed70680ef345f0658b5f6230`. Both changed production modules matched their packaged SHA-256 hashes before rollout. The service restarted through its normal shutdown drain, and `/health/ready` returned `status: ok` with `database: ok`.
+
+A live native Responses WebSocket smoke request completed with output `OK` under isolated diagnostic session `quota-failover-deploy-smoke-a0e6cc7188df4e788e1b63f5247cd5ae`. Automatic exhausted-owner recovery is covered by the route regressions and the real-selector integration test above; this live smoke confirms ordinary inference through the deployed image.
