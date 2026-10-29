@@ -12,6 +12,7 @@ from app.modules.proxy import api as proxy_api
 pytestmark = pytest.mark.integration
 
 BOOTSTRAP_MODEL_SLUGS = {
+    "gpt-6.1-sol",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -42,6 +43,7 @@ EXPECTED_CORE_MODEL_PLANS = {
 }
 
 EXPECTED_BOOTSTRAP_MINIMAL_CLIENT_VERSIONS = {
+    "gpt-6.1-sol": "0.153.0",
     "gpt-5.6-sol": "0.144.0",
     "gpt-5.6-terra": "0.144.0",
     "gpt-5.6-luna": "0.144.0",
@@ -1328,10 +1330,11 @@ async def test_backend_codex_models_keeps_supported_in_api_false_entries_out_of_
 
 
 @pytest.mark.asyncio
-async def test_backend_codex_models_uses_bootstrap_models_when_registry_not_populated(async_client):
+@pytest.mark.parametrize("path", ["/backend-api/codex/models", "/v1/models?client_version=0.165.0"])
+async def test_backend_codex_models_uses_bootstrap_models_when_registry_not_populated(async_client, path):
     registry = get_model_registry()
     registry._snapshot = None
-    resp = await async_client.get("/backend-api/codex/models")
+    resp = await async_client.get(path)
     assert resp.status_code == 200
     payload = resp.json()
     slugs = {item["slug"] for item in payload["models"]}
@@ -1341,6 +1344,12 @@ async def test_backend_codex_models_uses_bootstrap_models_when_registry_not_popu
     assert data_ids
     assert "gpt-5.5-pro" not in slugs
     assert all(not slug.startswith("gpt-image-") for slug in slugs)
+
+    entry = next(item for item in payload["models"] if item["slug"] == "gpt-6.1-sol")
+    assert entry["context_window"] == 500_000
+    assert entry["max_context_window"] == 872_000
+    assert entry["use_responses_lite"] is False
+    assert entry["tool_mode"] == "code_mode_only"
 
 
 @pytest.mark.asyncio

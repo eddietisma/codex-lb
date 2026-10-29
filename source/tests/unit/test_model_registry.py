@@ -53,6 +53,7 @@ EXPECTED_GPT56_MODEL_PLANS = {
 }
 
 EXPECTED_BOOTSTRAP_MINIMAL_CLIENT_VERSIONS = {
+    "gpt-6.1-sol": "0.153.0",
     "gpt-5.6-sol": "0.144.0",
     "gpt-5.6-terra": "0.144.0",
     "gpt-5.6-luna": "0.144.0",

@@ -276,6 +276,43 @@ def _gpt56_raw(
 # here for older pinned clients; the upstream backend still serves them.
 _BOOTSTRAP_STATIC_MODELS: tuple[UpstreamModel, ...] = (
     _bootstrap_model(
+        "gpt-6.1-sol",
+        "GPT-6.1-Sol",
+        description="Latest workhorse model for coding and everyday work.",
+        prefer_websockets=True,
+        minimal_client_version="0.153.0",
+        reasoning_levels=_REASONING_LEVELS_ULTRA,
+        context_window=500_000,
+        available_in_plans=_BOOTSTRAP_GPT56_AVAILABLE_IN_PLANS
+        | frozenset(
+            {
+                "ent26",
+                "enterprise_cbp_trial",
+                "hc_consumption",
+                "law",
+                "promax",
+                "rosalind_academic",
+                "self_serve_business_prolite",
+            }
+        ),
+        raw={
+            # Upstream metadata captured on 2026-10-29. Live refresh takes precedence.
+            "max_context_window": 872_000,
+            "apply_patch_tool_type": "freeform",
+            "web_search_tool_type": "text_and_image",
+            "supports_image_detail_original": True,
+            "tool_mode": "code_mode_only",
+            "multi_agent_version": "v2",
+            "use_responses_lite": True,
+            "include_skills_usage_instructions": False,
+            "auto_compact_token_limit": None,
+            "comp_hash": "3000",
+            "default_reasoning_summary": "none",
+            "supports_search_tool": True,
+            "experimental_supported_tools": ["send_user_message_async", "clock"],
+        },
+    ),
+    _bootstrap_model(
         "gpt-5.6-sol",
         "GPT-5.6-Sol",
         description="Latest frontier agentic coding model.",
