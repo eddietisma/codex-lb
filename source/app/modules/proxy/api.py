@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import math
@@ -1229,7 +1228,7 @@ async def responses(
         if not backend_non_streaming_requested:
             responses_payload.stream = True
         rate_limit_headers = await _rate_limit_headers_for_request(context, api_key)
-        response = await _source_responses_response(
+        return await _source_responses_response(
             request,
             responses_payload,
             source=source,
@@ -1240,8 +1239,6 @@ async def responses(
             native_codex_heartbeat=native_codex_heartbeat,
             context=context,
         )
-        response.headers["x-models-etag"] = await _current_codex_models_etag(api_key)
-        return response
 
     if not backend_non_streaming_requested:
         response = await _stream_responses(
@@ -1273,7 +1270,6 @@ async def responses(
             preserve_upstream_stream_mode=True,
             prohibit_fast_mode=prohibit_fast_mode,
         )
-    response.headers["x-models-etag"] = await _current_codex_models_etag(api_key)
     return _mark_subscription_prompt_cache_fallback(response, responses_payload)
 
 
@@ -1319,9 +1315,7 @@ async def responses_websocket(
             return
     client_turn_state = proxy_affinity_module._sticky_key_from_turn_state_header(websocket.headers)
     turn_state = proxy_affinity_module.ensure_downstream_turn_state(websocket.headers)
-    accept_headers = proxy_affinity_module.build_downstream_turn_state_accept_headers(turn_state)
-    accept_headers.append((b"x-models-etag", (await _current_codex_models_etag(api_key)).encode("ascii")))
-    await websocket.accept(headers=accept_headers)
+    await websocket.accept(headers=proxy_affinity_module.build_downstream_turn_state_accept_headers(turn_state))
     forwarded_headers = dict(websocket.headers)
     if client_turn_state is None and CODEX_0150_RESPONSES_WEBSOCKET_WIRE_PROFILE.synthesized_turn_state_header:
         forwarded_headers["x-codex-turn-state"] = turn_state
@@ -1693,9 +1687,7 @@ async def v1_responses_websocket(
             return
     client_turn_state = proxy_affinity_module._sticky_key_from_turn_state_header(websocket.headers)
     turn_state = proxy_affinity_module.ensure_downstream_turn_state(websocket.headers)
-    accept_headers = proxy_affinity_module.build_downstream_turn_state_accept_headers(turn_state)
-    accept_headers.append((b"x-models-etag", (await _current_codex_models_etag(api_key)).encode("ascii")))
-    await websocket.accept(headers=accept_headers)
+    await websocket.accept(headers=proxy_affinity_module.build_downstream_turn_state_accept_headers(turn_state))
     forwarded_headers = dict(websocket.headers)
     if client_turn_state is None and CODEX_0150_RESPONSES_WEBSOCKET_WIRE_PROFILE.synthesized_turn_state_header:
         forwarded_headers["x-codex-turn-state"] = turn_state
@@ -3863,15 +3855,6 @@ async def _proxy_images_edit_request(
     )
 
 
-def _codex_models_etag(body: bytes) -> str:
-    return f'"{hashlib.sha256(body).hexdigest()}"'
-
-
-async def _current_codex_models_etag(api_key: ApiKeyData | None) -> str:
-    response = await _build_codex_models_response_body(api_key)
-    return _codex_models_etag(response.body)
-
-
 async def _build_codex_models_response(api_key: ApiKeyData | None) -> Response:
     reservation = await _enforce_request_limits(
         api_key,
@@ -3879,9 +3862,7 @@ async def _build_codex_models_response(api_key: ApiKeyData | None) -> Response:
         request_service_tier=None,
     )
     try:
-        response = await _build_codex_models_response_body(api_key)
-        response.headers["ETag"] = _codex_models_etag(response.body)
-        return response
+        return await _build_codex_models_response_body(api_key)
     finally:
         if reservation is not None:
             await _release_reservation_deferring_cancellation(reservation)

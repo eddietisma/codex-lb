@@ -2769,8 +2769,6 @@ def test_backend_responses_websocket_forwards_client_tools_byte_identical(app_in
     monkeypatch.setattr(proxy_module, "get_settings_cache", lambda: _FakeSettingsCache())
     monkeypatch.setattr(proxy_module.ProxyService, "_connect_proxy_websocket", fake_connect_proxy_websocket)
 
-    monkeypatch.setitem(app_instance.dependency_overrides, proxy_api_module.validate_proxy_api_key, lambda: None)
-
     client_tools = [
         {
             "type": "namespace",
@@ -2819,10 +2817,7 @@ def test_backend_responses_websocket_forwards_client_tools_byte_identical(app_in
         request_payload["client_metadata"] = {"ws_request_header_x_openai_internal_codex_responses_lite": "true"}
 
     with TestClient(app_instance) as client:
-        catalog = client.get("/backend-api/codex/models")
-        assert catalog.status_code == 200
         with client.websocket_connect("/backend-api/codex/responses") as websocket:
-            assert dict(websocket.extra_headers)[b"x-models-etag"].decode() == catalog.headers["etag"]
             websocket.send_text(json.dumps(request_payload))
             first = json.loads(websocket.receive_text())
             second = json.loads(websocket.receive_text())
