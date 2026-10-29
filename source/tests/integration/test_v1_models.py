@@ -1025,6 +1025,21 @@ async def test_codex_catalog_disables_lite_only_for_local_gpt61(async_client, pa
 
 
 @pytest.mark.asyncio
+async def test_backend_codex_models_etag_tracks_metadata(async_client):
+    registry = get_model_registry()
+    await registry.update({"pro": [_make_upstream_model("gpt-6.1-sol", raw={"max_context_window": 500_000})]})
+    first = await async_client.get("/backend-api/codex/models")
+    unchanged = await async_client.get("/backend-api/codex/models")
+    assert first.status_code == unchanged.status_code == 200
+    assert first.headers["etag"] == unchanged.headers["etag"]
+
+    await registry.update({"pro": [_make_upstream_model("gpt-6.1-sol", raw={"max_context_window": 600_000})]})
+    changed = await async_client.get("/backend-api/codex/models")
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != first.headers["etag"]
+
+
+@pytest.mark.asyncio
 async def test_backend_codex_models_preserves_upstream_visibility(async_client):
     registry = get_model_registry()
     models = [
