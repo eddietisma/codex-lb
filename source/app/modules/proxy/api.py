@@ -4231,6 +4231,10 @@ def _to_codex_model_entry(
         if key not in skip_keys and isinstance(value, (bool, int, float, str, type(None), list, Mapping)):
             extra[key] = value
 
+    # Local workaround for Responses-Lite tool rejections in the Codex client.
+    if model.slug == "gpt-6.1-sol":
+        extra["use_responses_lite"] = False
+
     # If context_window is overridden, also override max_context_window to match
     effective_cw = _resolved_context_window(model, context_window_overrides)
     if effective_cw != model.context_window and "max_context_window" in extra:

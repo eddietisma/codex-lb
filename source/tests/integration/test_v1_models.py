@@ -1001,6 +1001,28 @@ async def test_backend_codex_models_entry_has_upstream_fields(async_client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/backend-api/codex/models", "/v1/models?client_version=0.165.0"])
+async def test_codex_catalog_disables_lite_only_for_local_gpt61(async_client, path):
+    registry = get_model_registry()
+    models = [
+        _make_upstream_model(
+            slug,
+            raw={"use_responses_lite": True, "tool_mode": "code_mode_only"},
+        )
+        for slug in ("gpt-6.1-sol", "gpt-5.6-sol")
+    ]
+    await registry.update({"pro": models})
+
+    resp = await async_client.get(path)
+    assert resp.status_code == 200
+    entries = {entry["slug"]: entry for entry in resp.json()["models"]}
+    assert entries["gpt-6.1-sol"]["use_responses_lite"] is False
+    assert entries["gpt-6.1-sol"]["tool_mode"] == "code_mode_only"
+    assert entries["gpt-5.6-sol"]["use_responses_lite"] is True
+    assert models[0].raw["use_responses_lite"] is True
+
+
+@pytest.mark.asyncio
 async def test_backend_codex_models_preserves_upstream_visibility(async_client):
     registry = get_model_registry()
     models = [
