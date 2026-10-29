@@ -480,6 +480,7 @@ function transformWorkspaces(source) {
   const start = source.lastIndexOf('function ', selector.index);
   const scope = source.slice(start, selector.index).match(new RegExp(`(${ID})=(${ID})\\((${ID})\\),\\{accountId:`));
   assert(scope, 'Unsupported app layout: sidebar scope');
+  const scopeCallPattern = scope[2].replaceAll('$', '\\$') + '\\(' + scope[3].replaceAll('$', '\\$') + '\\)';
   const sidebar = source.slice(start, selector.index);
   const catalog = sidebar.match(new RegExp(`(${ID})!=null&&(${ID})!=null\\?\\1\\.getPageState\\(\\2\\)`));
   const pageState = sidebar.match(new RegExp(`(${ID})=\\(0,${ID}\\.useSyncExternalStore\\)`));
@@ -518,7 +519,7 @@ function transformWorkspaces(source) {
   for (const call of calls) {
     const at = source.indexOf(call[0]);
     const functionAt = source.lastIndexOf('function ', at), head = source.slice(functionAt, at);
-    let parentScope = head.match(new RegExp(`(${ID})=${scope[2]}\\(${scope[3]}\\)`))?.[1];
+    let parentScope = head.match(new RegExp('(' + ID + ')=' + scopeCallPattern))?.[1];
     if (!parentScope) {
       parentScope = 'codexLbPriorityScope';
       const brace = source.indexOf('{', functionAt);
@@ -537,7 +538,7 @@ function transformWorkspaces(source) {
   for (const [index, call] of priorityCalls.entries()) {
     const placeholder = `codexLbPriorityCall${index}`;
     const at = source.indexOf(placeholder), functionAt = source.lastIndexOf('function ', at);
-    let parentScope = source.slice(functionAt, at).match(new RegExp(`(${ID})=${scope[2]}\\(${scope[3]}\\)`))?.[1];
+    let parentScope = source.slice(functionAt, at).match(new RegExp('(' + ID + ')=' + scopeCallPattern))?.[1];
     if (!parentScope) {
       parentScope = 'codexLbPriorityScope';
       const brace = source.indexOf('{', functionAt);
