@@ -2689,6 +2689,8 @@ class _WebSocketMixin:
                         and account is not None
                         and _is_websocket_response_create(payload)
                     ):
+                        if request_state.request_text is not None:
+                            text_data = request_state.request_text
                         text_data = _websocket_text_with_account_installation_id(text_data, account)
                         if request_state.fresh_upstream_request_text is not None:
                             fresh_upstream_request_text = _websocket_text_with_account_installation_id(
@@ -4003,6 +4005,32 @@ class _WebSocketMixin:
             account = selection.account
             if account is not None:
                 break
+            if (
+                selection.error_code in {None, USAGE_LIMIT_REACHED}
+                and require_preferred_account
+                and request_state.previous_response_id is not None
+                and request_state.response_id is None
+                and request_state.response_event_count == 0
+                and request_state.last_downstream_sequence_number is None
+                and not request_state.downstream_visible
+                and not request_state.file_required_preferred_account
+                and request_state.affinity_policy.codex_session_source != "turn_state"
+                and _prepare_websocket_request_state_for_account_switch(
+                    request_state,
+                    allow_client_full_resend=True,
+                )
+                is not None
+            ):
+                preferred_account_id = request_state.preferred_account_id
+                require_preferred_account = False
+                reallocate_sticky = True
+                request_state.affinity_policy = replace(request_state.affinity_policy, reallocate_sticky=True)
+                _facade().logger.info(
+                    "Retrying unavailable WebSocket owner with verified full history request_id=%s model=%s",
+                    request_state.request_log_id or request_state.request_id,
+                    model,
+                )
+                continue
             if selection.error_code == USAGE_LIMIT_REACHED:
                 break
 
@@ -5918,12 +5946,18 @@ class _WebSocketMixin:
             and request_state.response_id is not None
             and not request_state.awaiting_response_created
         )
+        quota_owner_replay = retry_error_code in {
+            USAGE_LIMIT_REACHED,
+            "insufficient_quota",
+            "quota_exceeded",
+            "usage_not_included",
+        }
         retry_safe_owner_replay = bool(
             not accepted_lifecycle_replay
             and retry_error_code in _facade()._WEBSOCKET_TRANSPARENT_REPLAY_ERROR_CODES
             and request_state.previous_response_id is not None
             and request_state.preferred_account_id is not None
-            and request_state.proxy_injected_previous_response_id
+            and (request_state.proxy_injected_previous_response_id or quota_owner_replay)
             and request_state.fresh_upstream_request_is_retry_safe
             and request_state.fresh_upstream_request_text
         )
@@ -5945,7 +5979,10 @@ class _WebSocketMixin:
             )
             retry_error_code = None
         if retry_safe_owner_replay and not retry_safe_previous_response_not_found:
-            safe_request_text = _prepare_websocket_request_state_for_account_switch(request_state)
+            safe_request_text = _prepare_websocket_request_state_for_account_switch(
+                request_state,
+                allow_client_full_resend=quota_owner_replay,
+            )
             if safe_request_text is None:
                 await proxy._handle_stream_error(
                     account,

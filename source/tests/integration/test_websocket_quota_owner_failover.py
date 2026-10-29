@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+
+import app.modules.proxy.api as proxy_api
+import app.modules.proxy.service as proxy_service
+from app.core.crypto import TokenEncryptor
+from app.core.utils.time import utcnow
+from app.db.models import Account, AccountStatus
+from app.db.session import SessionLocal
+from app.modules.accounts.repository import AccountsRepository
+from app.modules.proxy.load_balancer import AccountSelection
+from app.modules.usage.repository import UsageRepository
+from tests.integration.test_proxy_websocket_responses import (
+    _FakeUpstreamWebSocket,
+    _receive_until_terminal,
+    _recovered_upstream,
+    _websocket_settings,
+    _ws_event,
+)
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+def quota_owner(monkeypatch):
+    owner = Account(id="quota-owner", email="owner@example.invalid", plan_type="pro", status=AccountStatus.ACTIVE)
+    replacement = Account(
+        id="quota-replacement", email="replacement@example.invalid", plan_type="pro", status=AccountStatus.ACTIVE
+    )
+    state = SimpleNamespace(
+        owner=owner,
+        replacement=replacement,
+        blocked=True,
+        replacement_available=True,
+        file_owner=False,
+        real_select=proxy_service.ProxyService._select_account_with_budget,
+        selections=[],
+        opened=[],
+        handled=[],
+        rejected=_FakeUpstreamWebSocket(
+            [_ws_event({"type": "error", "error": {"code": "usage_limit_reached", "message": "Quota exhausted"}})]
+        ),
+        recovered=_recovered_upstream("resp_quota_recovered"),
+    )
+
+    class SettingsCache:
+        async def get(self):
+            return _websocket_settings()
+
+    async def allow(*args, **kwargs):
+        return None
+
+    async def resolve_owner(*args, **kwargs):
+        return owner.id
+
+    async def resolve_file_owner(*args, **kwargs):
+        return owner.id if state.file_owner else None
+
+    async def select(self, deadline, **kwargs):
+        preferred = kwargs.get("preferred_account_id")
+        required = not kwargs.get("fallback_on_preferred_account_unavailable", True)
+        state.selections.append((preferred, required))
+        if required or not state.blocked:
+            if not state.blocked:
+                return AccountSelection(account=owner, error_message=None)
+        elif state.replacement_available:
+            return AccountSelection(account=replacement, error_message=None)
+        return AccountSelection(account=None, error_code="usage_limit_reached", error_message="Owner quota exhausted")
+
+    async def open_attempt(self, account, headers, **kwargs):
+        state.opened.append(account.id)
+        return account, state.rejected if account.id == owner.id else state.recovered
+
+    async def handle_error(self, account, error, code, **kwargs):
+        state.handled.append((account.id, code))
+        state.blocked = True
+
+    monkeypatch.setattr(proxy_api, "_websocket_firewall_denial_response", allow)
+    monkeypatch.setattr(proxy_api, "validate_proxy_api_key_authorization", allow)
+    monkeypatch.setattr(proxy_service, "get_settings_cache", lambda: SettingsCache())
+    monkeypatch.setattr(proxy_service.ProxyService, "_resolve_websocket_previous_response_owner", resolve_owner)
+    monkeypatch.setattr(proxy_service.ProxyService, "_resolve_compact_turn_state_owner", resolve_owner)
+    monkeypatch.setattr(proxy_service.ProxyService, "_resolve_file_account_for_responses", resolve_file_owner)
+    monkeypatch.setattr(proxy_service.ProxyService, "_select_account_with_budget", select)
+    monkeypatch.setattr(proxy_service.ProxyService, "_try_open_websocket_connect_attempt", open_attempt)
+    monkeypatch.setattr(proxy_service.ProxyService, "_handle_stream_error", handle_error)
+    monkeypatch.setattr(proxy_service.ProxyService, "_write_request_log", allow)
+    return state
+
+
+def _request(input_items):
+    return {
+        "type": "response.create",
+        "model": "gpt-6.1-sol",
+        "instructions": "Return OK.",
+        "previous_response_id": "resp_quota_previous",
+        "input": input_items,
+        "stream": True,
+    }
+
+
+def _run(app_instance, payload, *, route="/backend-api/codex/responses", headers=None):
+    with TestClient(app_instance) as client:
+        with client.websocket_connect(route, headers=headers or {}) as websocket:
+            websocket.send_text(json.dumps(payload))
+            return _receive_until_terminal(websocket)
+
+
+@pytest.mark.parametrize("route", ["/backend-api/codex/responses", "/v1/responses"])
+@pytest.mark.parametrize("stage", ["selection", "upstream"])
+def test_verified_full_resend_switches_exhausted_previous_response_owner(app_instance, quota_owner, route, stage):
+    quota_owner.blocked = stage == "selection"
+    input_items = [{"role": "user", "content": "original context"}, {"role": "user", "content": "continue"}]
+
+    events, disconnect = _run(app_instance, _request(input_items), route=route)
+
+    assert disconnect is None
+    assert [event["type"] for event in events] == ["response.created", "response.completed"]
+    assert quota_owner.opened[-1] == quota_owner.replacement.id
+    assert quota_owner.selections == [(quota_owner.owner.id, True), (None, False)]
+    replay = json.loads(quota_owner.recovered.sent_text[0])
+    assert "previous_response_id" not in replay
+    assert replay["input"] == input_items
+    assert len(quota_owner.recovered.sent_text) == 1
+    assert quota_owner.handled == ([] if stage == "selection" else [(quota_owner.owner.id, "usage_limit_reached")])
+
+
+@pytest.mark.parametrize("dependency", ["delta", "file", "turn_state", "orphan_tool"])
+def test_exhausted_previous_response_owner_preserves_account_owned_context(app_instance, quota_owner, dependency):
+    input_items = [{"role": "user", "content": "original context"}, {"role": "user", "content": "continue"}]
+    headers = {}
+    if dependency == "delta":
+        input_items = input_items[-1:]
+    elif dependency == "file":
+        quota_owner.file_owner = True
+        input_items[0]["content"] = [{"type": "input_file", "file_id": "file_quota_owner"}]
+    elif dependency == "turn_state":
+        headers["x-codex-turn-state"] = "quota-owner-turn-state"
+    else:
+        input_items[-1] = {"type": "function_call_output", "call_id": "missing_call", "output": "result"}
+
+    events, disconnect = _run(app_instance, _request(input_items), headers=headers)
+
+    assert disconnect is None
+    assert events[-1]["type"] == "error"
+    assert events[-1]["error"]["code"] == "previous_response_owner_unavailable"
+    assert quota_owner.opened == []
+    assert quota_owner.selections == [(quota_owner.owner.id, True)]
+
+
+def test_exhausted_previous_response_owner_stops_when_replacement_pool_is_empty(app_instance, quota_owner):
+    quota_owner.replacement_available = False
+    input_items = [{"role": "user", "content": "original context"}, {"role": "user", "content": "continue"}]
+
+    events, disconnect = _run(app_instance, _request(input_items))
+
+    assert disconnect is None
+    assert events[-1]["error"]["code"] == "usage_limit_reached"
+    assert quota_owner.opened == []
+    assert quota_owner.selections == [(quota_owner.owner.id, True), (None, False)]
+
+
+@pytest.mark.asyncio
+async def test_quota_owner_recovery_uses_real_account_eligibility(app_instance, quota_owner, monkeypatch):
+    encryptor = TokenEncryptor()
+    now = int(datetime.now(tz=timezone.utc).timestamp())
+    quota_owner.owner.status = AccountStatus.RATE_LIMITED
+    quota_owner.owner.reset_at = now + 604800
+    quota_owner.owner.blocked_at = now
+    async with SessionLocal() as session:
+        accounts = AccountsRepository(session)
+        usage = UsageRepository(session)
+        for account in [quota_owner.owner, quota_owner.replacement]:
+            account.chatgpt_account_id = account.id
+            account.access_token_encrypted = encryptor.encrypt("test-access")
+            account.refresh_token_encrypted = encryptor.encrypt("test-refresh")
+            account.id_token_encrypted = encryptor.encrypt("test-id")
+            account.last_refresh = utcnow()
+            await accounts.upsert(account)
+            for window, duration in [("primary", 300), ("secondary", 10080)]:
+                await usage.add_entry(
+                    account_id=account.id,
+                    window=window,
+                    used_percent=100 if account.id == quota_owner.owner.id else 20,
+                    reset_at=now + duration * 60,
+                    window_minutes=duration,
+                )
+    monkeypatch.setattr(proxy_service.ProxyService, "_select_account_with_budget", quota_owner.real_select)
+    input_items = [{"role": "user", "content": "original context"}, {"role": "user", "content": "continue"}]
+
+    events, disconnect = await asyncio.to_thread(_run, app_instance, _request(input_items))
+
+    assert disconnect is None
+    assert [event["type"] for event in events] == ["response.created", "response.completed"], events
+    assert quota_owner.opened == [quota_owner.replacement.id]
+    replay = json.loads(quota_owner.recovered.sent_text[0])
+    assert "previous_response_id" not in replay
+    assert replay["input"] == input_items
