@@ -11,3 +11,7 @@ Conversation, session, previous-response and previous-owner identifiers use the 
 - All 183 native WebSocket, generate-failover and quota-owner integration tests passed.
 - All 103 selected previous-response, account-switch and fresh-replay unit tests passed.
 - Ruff lint, formatting, targeted type checking, strict OpenSpec change validation and `git diff --check` passed.
+
+## Deployment
+
+The local service runs `codex-lb:replay-logging-534b0fbf`, built from revision `534b0fbf38b3a0f4627d298e30173803162ddbd5`. The packaged helper module matched the validated source SHA-256 hash. An isolated container smoke check emitted the warning with hashed references and no input text. The normal service drain completed and readiness returned `status: ok` with `database: ok`.

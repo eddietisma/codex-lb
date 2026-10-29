@@ -4,4 +4,4 @@
 - [x] Verify one warning for recovery and no repeats on later incremental messages.
 - [x] Verify no recovery warning for rejected account-owned input.
 - [x] Run focused tests, static checks, and strict change validation.
-- [ ] Update the specification, archive the verified change, and deploy.
+- [x] Update the specification, archive the verified change, and deploy.
