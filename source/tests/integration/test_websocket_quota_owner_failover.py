@@ -40,6 +40,7 @@ def quota_owner(monkeypatch):
         blocked=True,
         replacement_available=True,
         file_owner=False,
+        priming=False,
         real_select=proxy_service.ProxyService._select_account_with_budget,
         selections=[],
         opened=[],
@@ -48,6 +49,7 @@ def quota_owner(monkeypatch):
             [_ws_event({"type": "error", "error": {"code": "usage_limit_reached", "message": "Quota exhausted"}})]
         ),
         recovered=_recovered_upstream("resp_quota_recovered"),
+        initial=_recovered_upstream("resp_quota_previous"),
     )
 
     class SettingsCache:
@@ -76,6 +78,8 @@ def quota_owner(monkeypatch):
 
     async def open_attempt(self, account, headers, **kwargs):
         state.opened.append(account.id)
+        if state.priming:
+            return account, state.initial
         return account, state.rejected if account.id == owner.id else state.recovered
 
     async def handle_error(self, account, error, code, **kwargs):
@@ -113,18 +117,52 @@ def _run(app_instance, payload, *, route="/backend-api/codex/responses", headers
             return _receive_until_terminal(websocket)
 
 
+def _run_proxy_resend(
+    app_instance, state, *, route="/backend-api/codex/responses", stage="selection", on_primed=None, extra_input=None
+):
+    headers = {"session_id": "quota-owned-history", "thread-id": "quota-owned-thread", "user-agent": "codex/1.2"}
+    history = [{"role": "user", "content": "original context"}]
+    initial = _request(history)
+    initial.pop("previous_response_id")
+    with TestClient(app_instance) as client:
+        state.priming = True
+        state.blocked = False
+        with client.websocket_connect(route, headers=headers) as websocket:
+            websocket.send_text(json.dumps(initial))
+            first_events, disconnect = _receive_until_terminal(websocket)
+            assert disconnect is None
+            assert first_events[-1]["type"] == "response.completed"
+        state.priming = False
+        state.blocked = stage == "selection"
+        state.selections.clear()
+        state.opened.clear()
+        if on_primed is not None:
+            on_primed()
+        history += [
+            {"role": "assistant", "content": [{"type": "output_text", "text": "OK"}]},
+            {"role": "user", "content": "continue"},
+        ]
+        if extra_input is not None:
+            history.insert(-1, extra_input)
+        followup = _request(history)
+        followup.pop("previous_response_id")
+        with client.websocket_connect(route, headers=headers) as websocket:
+            websocket.send_text(json.dumps(followup))
+            return _receive_until_terminal(websocket), history
+
+
 @pytest.mark.parametrize("route", ["/backend-api/codex/responses", "/v1/responses"])
 @pytest.mark.parametrize("stage", ["selection", "upstream"])
-def test_verified_full_resend_switches_exhausted_previous_response_owner(app_instance, quota_owner, route, stage):
-    quota_owner.blocked = stage == "selection"
-    input_items = [{"role": "user", "content": "original context"}, {"role": "user", "content": "continue"}]
-
-    events, disconnect = _run(app_instance, _request(input_items), route=route)
+def test_proxy_retained_full_resend_switches_exhausted_previous_response_owner(app_instance, quota_owner, route, stage):
+    (events, disconnect), input_items = _run_proxy_resend(app_instance, quota_owner, route=route, stage=stage)
 
     assert disconnect is None
     assert [event["type"] for event in events] == ["response.created", "response.completed"]
     assert quota_owner.opened[-1] == quota_owner.replacement.id
-    assert quota_owner.selections == [(quota_owner.owner.id, True), (None, False)]
+    if route == "/backend-api/codex/responses":
+        assert quota_owner.selections == [(quota_owner.owner.id, True), (None, False)]
+    else:
+        assert quota_owner.selections == [(None, False)] * (1 if stage == "selection" else 2)
     replay = json.loads(quota_owner.recovered.sent_text[0])
     assert "previous_response_id" not in replay
     assert replay["input"] == input_items
@@ -157,14 +195,40 @@ def test_exhausted_previous_response_owner_preserves_account_owned_context(app_i
 
 def test_exhausted_previous_response_owner_stops_when_replacement_pool_is_empty(app_instance, quota_owner):
     quota_owner.replacement_available = False
-    input_items = [{"role": "user", "content": "original context"}, {"role": "user", "content": "continue"}]
-
-    events, disconnect = _run(app_instance, _request(input_items))
+    (events, disconnect), _ = _run_proxy_resend(app_instance, quota_owner)
 
     assert disconnect is None
     assert events[-1]["error"]["code"] == "usage_limit_reached"
     assert quota_owner.opened == []
     assert quota_owner.selections == [(quota_owner.owner.id, True), (None, False)]
+
+
+@pytest.mark.parametrize("stage", ["selection", "upstream"])
+def test_client_anchor_with_multiple_partial_messages_does_not_switch_accounts(app_instance, quota_owner, stage):
+    quota_owner.blocked = stage == "selection"
+    partial = [{"role": "user", "content": "later context only"}, {"role": "user", "content": "continue"}]
+
+    events, disconnect = _run(app_instance, _request(partial))
+
+    assert disconnect is None
+    assert events[-1]["type"] in {"error", "response.failed"}
+    assert quota_owner.replacement.id not in quota_owner.opened
+    assert quota_owner.selections == [(quota_owner.owner.id, True)]
+
+
+@pytest.mark.parametrize("item_type", ["reasoning", "compaction"])
+def test_proxy_anchor_with_encrypted_context_stays_on_original_account(app_instance, quota_owner, item_type):
+    (events, disconnect), _ = _run_proxy_resend(
+        app_instance,
+        quota_owner,
+        extra_input={"type": item_type, "encrypted_content": "opaque-owner-context"},
+    )
+
+    assert disconnect is None
+    assert events[-1]["type"] in {"error", "response.failed"}
+    assert quota_owner.opened == []
+    assert quota_owner.selections == [(quota_owner.owner.id, True)]
+    assert quota_owner.recovered.sent_text == []
 
 
 @pytest.mark.asyncio
@@ -192,10 +256,13 @@ async def test_quota_owner_recovery_uses_real_account_eligibility(app_instance, 
                     reset_at=now + duration * 60,
                     window_minutes=duration,
                 )
-    monkeypatch.setattr(proxy_service.ProxyService, "_select_account_with_budget", quota_owner.real_select)
-    input_items = [{"role": "user", "content": "original context"}, {"role": "user", "content": "continue"}]
 
-    events, disconnect = await asyncio.to_thread(_run, app_instance, _request(input_items))
+    def restore_real_selection():
+        monkeypatch.setattr(proxy_service.ProxyService, "_select_account_with_budget", quota_owner.real_select)
+
+    (events, disconnect), input_items = await asyncio.to_thread(
+        _run_proxy_resend, app_instance, quota_owner, on_primed=restore_real_selection
+    )
 
     assert disconnect is None
     assert [event["type"] for event in events] == ["response.created", "response.completed"], events

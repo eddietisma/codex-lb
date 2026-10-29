@@ -690,18 +690,13 @@ async def _record_or_defer_websocket_accepted_replay_health(
 
 def _prepare_websocket_request_state_for_account_switch(
     request_state: "_WebSocketRequestState",
-    *,
-    allow_client_full_resend: bool = False,
 ) -> str | None:
     """Return an unsent request body only when moving accounts is proven safe."""
     if request_state.previous_response_id is None:
         if not _websocket_request_text_is_account_neutral_fresh_replay(request_state.request_text):
             return None
         return request_state.request_text
-    return _install_verified_fresh_replay(
-        request_state,
-        require_proxy_injected_previous_response_id=not allow_client_full_resend,
-    )
+    return _install_verified_fresh_replay(request_state)
 
 
 def _retire_websocket_continuity_anchor(continuity_state: _WebSocketContinuityState) -> None:
