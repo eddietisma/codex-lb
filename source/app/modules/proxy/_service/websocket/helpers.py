@@ -591,6 +591,7 @@ def _install_fresh_replay_body(
         if request_state.affinity_policy.codex_session_source == "turn_state"
         else None
     )
+    previous_response_id = request_state.previous_response_id
     request_state.request_text = fresh_request_text
     request_state.previous_response_id = None
     if release_owner_pin:
@@ -600,6 +601,21 @@ def _install_fresh_replay_body(
     request_state.fresh_upstream_request_is_retry_safe = False
     request_state.responses_lite_model = request_state.fresh_upstream_request_responses_lite_model
     _refresh_websocket_request_input_fingerprint_from_text(request_state)
+    if previous_response_id is not None:
+        _facade().logger.warning(
+            "websocket_full_history_replay stage=prepared request_id=%s conversation_id=%s session_id=%s "
+            "previous_response_id=%s previous_owner=%s input_items=%s replay_count=%s account_neutral=%s "
+            "release_owner_pin=%s",
+            request_state.request_log_id or request_state.request_id,
+            _hash_identifier_or_none(request_state.conversation_id),
+            _hash_identifier_or_none(request_state.session_id),
+            _hash_identifier_or_none(previous_response_id),
+            _hash_identifier_or_none(replay_required_account_id),
+            request_state.input_item_count,
+            request_state.replay_count,
+            account_neutral,
+            release_owner_pin,
+        )
     return fresh_request_text
 
 
