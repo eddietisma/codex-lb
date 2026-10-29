@@ -929,6 +929,12 @@ def _strip_unsupported_fields(
     _strip_subscription_prompt_cache_controls(payload)
     _sanitize_interleaved_reasoning_input(payload)
     _strip_poisoned_local_compact_fallback_items(payload)
+    input_items = payload.get("input")
+    if payload.get("model") == "gpt-6.1-sol" and "tools" in payload and is_json_list(input_items):
+        # Standard tools supersede Lite bundles retained by existing threads.
+        payload["input"] = [
+            item for item in input_items if not (is_json_mapping(item) and item.get("type") == "additional_tools")
+        ]
     if strip_replayed_tool_call_namespaces:
         strip_replayed_tool_call_namespaces_from_payload(payload)
     # ``tools`` is deliberately NOT canonicalized here: the wire payload must

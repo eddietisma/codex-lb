@@ -887,6 +887,23 @@ def test_responses_input_developer_message_is_sanitized_like_other_messages(requ
     assert request.to_payload()["input"] == expected
 
 
+@pytest.mark.parametrize(
+    ("model", "standard_tools", "keep_bundle"),
+    [("gpt-6.1-sol", True, False), ("gpt-6.1-sol", False, True), ("gpt-5.6-sol", True, True)],
+)
+def test_local_gpt61_standard_tools_supersede_historical_lite_bundle(model, standard_tools, keep_bundle):
+    bundle = {"type": "additional_tools", "role": "developer", "tools": [{"type": "custom", "name": "old_shell"}]}
+    message = {"role": "user", "content": "Continue"}
+    raw = {"model": model, "instructions": "", "input": [bundle, message]}
+    if standard_tools:
+        raw["tools"] = []
+    request = ResponsesRequest.model_validate(raw)
+    wire = request.to_payload()
+    assert wire["input"] == ([bundle, message] if keep_bundle else [message])
+    assert request.input == [bundle, message]
+    assert ("tools" in wire) is standard_tools
+
+
 @pytest.mark.parametrize("request_type", [ResponsesRequest, ResponsesCompactRequest])
 def test_responses_input_additional_tools_item_is_preserved(request_type):
     additional_tools = {

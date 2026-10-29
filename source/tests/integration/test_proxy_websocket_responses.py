@@ -2680,7 +2680,8 @@ def test_backend_responses_websocket_proxies_and_persists_conversation_id(
     assert latency_first_upstream_event_ms <= latency_response_created_ms <= latency_first_token_ms
 
 
-def test_backend_responses_websocket_forwards_client_tools_byte_identical(app_instance, monkeypatch):
+@pytest.mark.parametrize("historical_lite", [False, True])
+def test_backend_responses_websocket_forwards_client_tools_byte_identical(app_instance, monkeypatch, historical_lite):
     # Regression for issue #1184: client-sent top-level tools must reach the
     # upstream ``response.create`` frame byte-identical — array order, object
     # key order, unknown keys, and array-value order all preserved. The
@@ -2806,6 +2807,14 @@ def test_backend_responses_websocket_forwards_client_tools_byte_identical(app_in
         "tools": client_tools,
         "stream": True,
     }
+    if historical_lite:
+        request_payload["model"] = "gpt-6.1-sol"
+        request_payload["input"].insert(
+            0,
+            {"type": "additional_tools", "role": "developer", "tools": [{"type": "custom", "name": "old_shell"}]},
+        )
+        client_tools.append({"type": "web_search"})
+        request_payload["client_metadata"] = {"ws_request_header_x_openai_internal_codex_responses_lite": "true"}
 
     with TestClient(app_instance) as client:
         with client.websocket_connect("/backend-api/codex/responses") as websocket:
@@ -2819,6 +2828,11 @@ def test_backend_responses_websocket_forwards_client_tools_byte_identical(app_in
     frame = fake_upstream.sent_text[0]
     expected_tools_bytes = '"tools":' + json.dumps(client_tools, ensure_ascii=True, separators=(",", ":"))
     assert expected_tools_bytes in frame
+    if historical_lite:
+        sent = json.loads(frame)
+        assert sent["input"] == request_payload["input"][1:]
+        assert "ws_request_header_x_openai_internal_codex_responses_lite" not in sent.get("client_metadata", {})
+        assert request_payload["input"][0]["type"] == "additional_tools"
 
 
 def test_backend_responses_websocket_strips_replayed_tool_call_namespaces(app_instance, monkeypatch):
