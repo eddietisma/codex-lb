@@ -281,30 +281,23 @@ function createWorkspaceFilter(react, jsx, threadAtom, projectKey, chatProjectKe
     }
     return visit(value);
   }
-  function filterResult(data, scope, paging) {
+  function filterResult(data, scope) {
     const folders = selectedFolders(useWorkspace());
-    const result = filter(data, scope, folders);
-    react().useEffect(() => {
-      if (!folders?.length || result.layout.chatKeys.length >= 10 || paging.loading || !paging.hasMore) return;
-      let cancelled = false;
-      // Continue through nonmatching history pages, including an initially empty result.
-      Promise.resolve().then(() => { if (!cancelled) return paging.loadMore(); }).catch(() => {});
-      return () => { cancelled = true; };
-    }, [folders, result, paging.loading, paging.hasMore, paging.reader, paging.pageScope]);
-    return result;
+    // Keep the app's native pagination. Filtering must not scan the whole history.
+    return filter(data, scope, folders);
   }
   function filter(data, scope, folders = selectedFolders()) {
     if (folders === null) return data;
     const selection = JSON.stringify(folders);
     const previous = cache.get(data);
-    const groups = data.codexLbAllProjectGroups ?? [...data.orderedPinnedProjectGroups, ...data.allCodexProjectGroups];
+    const groups = folders.length ? data.codexLbAllProjectGroups ?? [...data.orderedPinnedProjectGroups, ...data.allCodexProjectGroups] : [];
     const allowedProjects = new Set(), allowedThreads = new Set();
     for (const group of groups) {
       if (!matches(group, folders)) continue;
       allowedProjects.add(projectKey(group.projectId));
       for (const key of group.threadKeys) allowedThreads.add(key);
     }
-    for (const item of data.chatGptProjectTargets) {
+    for (const item of folders.length ? data.chatGptProjectTargets : []) {
       const id = item.project.gizmo.id, linkedId = data.linkedLocalProjectIdByChatGptProjectId.get(id);
       if (allowedProjects.has(projectKey(linkedId)) || matches(data.codexLbLocalProjects?.[linkedId], folders)) {
         allowedProjects.add(chatProjectKey(id));
@@ -312,7 +305,7 @@ function createWorkspaceFilter(react, jsx, threadAtom, projectKey, chatProjectKe
       }
     }
     const conversationByKey = new Map();
-    for (const [key, item] of data.conversationByKey) {
+    for (const [key, item] of folders.length ? data.conversationByKey : []) {
       const allowed = item.source === 'codex'
         ? allowedThreads.has(item.threadKey) || matches(scope.get(threadAtom(), item.threadKey), folders)
         : allowedProjects.has(chatProjectKey(item.target.projectId)) || matches(item.target.conversation, folders);
@@ -358,11 +351,13 @@ function createWorkspaceFilter(react, jsx, threadAtom, projectKey, chatProjectKe
       color: 'inherit', font: 'inherit', cursor: 'pointer' };
     const button = (label, active, onClick, extra = {}) => h('button', {
       type: 'button', onClick, ...extra,
-      style: { flexShrink: 0, border: '1px solid var(--border-color, #6666)', borderRadius: 999,
-        padding: '4px 10px', background: active ? 'var(--color-token-bg-secondary, #8883)' : 'transparent',
-        color: 'inherit', font: 'inherit', cursor: 'pointer', fontWeight: active ? 600 : 400 }, children: label,
+      style: { flexShrink: 0, boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        height: 24, minHeight: 0, border: '1px solid var(--border-color, #6666)', borderRadius: 999,
+        padding: label === '+' ? 0 : '0 8px', width: label === '+' ? 24 : undefined,
+        background: active ? 'var(--color-token-bg-secondary, #8883)' : 'transparent',
+        color: 'inherit', font: 'inherit', fontSize: 12, lineHeight: '16px', cursor: 'pointer', fontWeight: active ? 600 : 400 }, children: label,
     }, label);
-    return h('div', { 'data-codex-lb-workspaces': true, style: { minWidth: 0, padding: '8px 12px' }, children: [
+    return h('div', { 'data-codex-lb-workspaces': true, style: { minWidth: 0, padding: '4px 12px', fontSize: 12, lineHeight: '16px' }, children: [
       h('div', { role: 'group', 'aria-label': 'Workspace filter',
         style: { display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none', touchAction: 'pan-x', paddingBottom: 3 },
         onWheel: event => { if (event.deltaY && !event.deltaX) event.currentTarget.scrollLeft += event.deltaY; },
@@ -418,25 +413,22 @@ function createWorkspaceFilter(react, jsx, threadAtom, projectKey, chatProjectKe
   }
   function withControls(props) {
     const h = jsx().jsx;
-    return { ...props, topContent: h(react().Fragment, { children: [h(Controls, {}, 'workspaces'),
-      h(react().Fragment, { children: props.topContent }, 'original')] }) };
+    const topContent = react().useMemo(() => h(react().Fragment, { children: [h(Controls, {}, 'workspaces'),
+      h(react().Fragment, { children: props.topContent }, 'original')] }), [props.topContent]);
+    return { ...props, topContent };
   }
   function filterNative(data, scope) {
     const folders = selectedFolders(useWorkspace());
-    const threadKeys = [...new Set(['threadKeys', 'chatSectionThreadKeys', 'pinnedProjectThreadKeys', 'navigationThreadKeys', 'shortcutThreadKeys']
+    const projectGroups = folders === null ? data.projectGroups : folders.length ? data.projectGroups.filter(group => matches(group, folders)) : [];
+    const allowedThreads = new Set(folders?.length ? projectGroups.flatMap(group => group.threadKeys) : []);
+    const threadKeys = folders?.length ? [...new Set(['threadKeys', 'chatSectionThreadKeys', 'pinnedProjectThreadKeys', 'navigationThreadKeys', 'shortcutThreadKeys']
       .flatMap(key => data[key] ?? []).concat(data.projectGroups.flatMap(group => group.threadKeys),
-        data.connectionGroups?.flatMap(group => group.threadKeys) ?? []))];
-    const matchingThreads = new Set(folders === null ? [] : threadKeys.filter(key => matches(scope.get(threadAtom(), key), folders)));
-    const membership = JSON.stringify([...matchingThreads]);
+        data.connectionGroups?.flatMap(group => group.threadKeys) ?? []))] : [];
+    const matchingThreads = new Set(threadKeys.filter(key => allowedThreads.has(key) || matches(scope.get(threadAtom(), key), folders)));
+    const membership = JSON.stringify([projectGroups.map(group => group.projectId), [...matchingThreads]]);
     return react().useMemo(() => {
       if (folders === null) return data;
-      const allowedThreads = new Set();
-      const projectGroups = data.projectGroups.filter(group => {
-        if (!matches(group, folders)) return false;
-        for (const key of group.threadKeys) allowedThreads.add(key);
-        return true;
-      });
-      const allowed = key => allowedThreads.has(key) || matchingThreads.has(key);
+      const allowed = key => matchingThreads.has(key);
       const result = { ...data, projectGroups };
       for (const key of ['threadKeys', 'chatSectionThreadKeys', 'pinnedProjectThreadKeys', 'navigationThreadKeys', 'shortcutThreadKeys']) {
         if (data[key]) result[key] = data[key].filter(allowed);
@@ -450,6 +442,7 @@ function createWorkspaceFilter(react, jsx, threadAtom, projectKey, chatProjectKe
   function filterPriority(items, scope) {
     const folders = selectedFolders(useWorkspace());
     function allowed(item) {
+      if (!folders?.length) return folders === null;
       if (item.kind === 'task') return matches(item.threadEntry, folders) || matches(item.projectGroup, folders)
         || matches(scope.get(threadAtom(), item.threadEntry.key), folders);
       const metadata = chatMetadata(scope, item);
@@ -482,11 +475,6 @@ function transformWorkspaces(source) {
   assert(scope, 'Unsupported app layout: sidebar scope');
   const scopeCallPattern = scope[2].replaceAll('$', '\\$') + '\\(' + scope[3].replaceAll('$', '\\$') + '\\)';
   const sidebar = source.slice(start, selector.index);
-  const catalog = sidebar.match(new RegExp(`(${ID})!=null&&(${ID})!=null\\?\\1\\.getPageState\\(\\2\\)`));
-  const pageState = sidebar.match(new RegExp(`(${ID})=\\(0,${ID}\\.useSyncExternalStore\\)`));
-  // Resolve the ChatGPT history hook directly instead of relying on unrelated locals.
-  const historyCall = sidebar.match(new RegExp(`let (${ID})=(${ID})\\((${ID})\\),${ID};(?=.*?chatTargets:)`));
-  assert(catalog && pageState && historyCall, 'Unsupported app layout: sidebar history paging');
   const navigation = one(new RegExp(`let (${ID})=${ID}\\.get\\((${ID}),${ID}\\.threadKey\\);${ID}\\(${ID},${ID}\\.threadKey,`, 'g'), 'sidebar thread metadata');
   const project = one(new RegExp(`for\\(let (${ID}) of ${ID}\\?\\[\\.\\.\\.${ID},\\.\\.\\.${ID}\\]:\\[\\]\\)${ID}\\.set\\((${ID})\\(\\1\\.projectId\\),\\{source:\x60codex\x60,group:\\1\\}\\);for\\(let (${ID}) of ${ID}\\)${ID}\\.set\\((${ID})\\(\\3\\.project\\.gizmo\\.id\\)`, 'g'), 'sidebar project keys');
   const container = one(new RegExp(`function (${ID})\\((${ID})\\)\\{let ${ID}=\\(0,${ID}\\.c\\)\\(\\d+\\),\\{activeThreadKey:${ID},activeThreadIsPinned:${ID},handleSidebarScroll:`, 'g'), 'sidebar container');
@@ -498,7 +486,7 @@ function transformWorkspaces(source) {
   const jsxOwner = containerCode.match(new RegExp(`\\(0,(${ID})\\.jsx\\)`))?.[1];
   assert(jsxOwner, 'Unsupported app layout: sidebar JSX');
   const jsxFactory = one(new RegExp(`${jsxOwner}=(${ID})\\(\\)`, 'g'), 'sidebar JSX factory')[1];
-  const before = selector[0], after = `${selector[1]}=codexLbWorkspace.filterResult(${selector[2]}(${selector[3]},${selector[4]}),${scope[1]},{reader:${catalog[1]},pageScope:${catalog[2]},hasMore:${pageState[1]}.hasMore||${historyCall[1]}.canFetchNextConversationPage,loading:${pageState[1]}.isLoading||${historyCall[1]}.isFetchingNextConversationPage,loadMore:()=>Promise.all([${pageState[1]}.hasMore?${catalog[1]}?.loadMore(${catalog[2]},50):void 0,${historyCall[1]}.canFetchNextConversationPage?${historyCall[1]}.fetchNextConversationPage(50):void 0])}),{orderedPinnedProjectGroups:`;
+  const before = selector[0], after = `${selector[1]}=codexLbWorkspace.filterResult(${selector[2]}(${selector[3]},${selector[4]}),${scope[1]}),{orderedPinnedProjectGroups:`;
   source = source.replace(before, after);
   changes.push({ name: 'workspace sidebar filtering', before, after });
   const containerAfter = container[0].replace('{let ', `{${container[2]}=codexLbWorkspace.withControls(${container[2]});let `);

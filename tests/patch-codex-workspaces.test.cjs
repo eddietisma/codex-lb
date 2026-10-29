@@ -166,20 +166,33 @@ test('selected workspace with no folders hides native and priority items', () =>
   assert.deepEqual(filter.filterPriority([{ kind: 'task', threadEntry: { key: 'hsb' } }], scope), []);
 });
 
-test('empty matching history loads another page and cancellation prevents the request', async () => {
+test('filtering sparse history does not fetch additional pages or schedule effects', async () => {
   const { data, scope, filter, effects } = fixture('HSB');
   data.conversationByKey = new Map();
   data.layout.chatKeys = [];
   let calls = 0;
-  const result = filter.filterResult(data, scope, { hasMore: true, loading: false, loadMore: async () => { calls++; } });
-  assert.equal(result.layout.chatKeys.length, 0);
-  effects[0]();
+  for (let page = 0; page < 1000; page++) {
+    const result = filter.filterResult({ ...data }, scope, { hasMore: true, loading: false, loadMore: async () => { calls++; } });
+    assert.equal(result.layout.chatKeys.length, 0);
+  }
   await Promise.resolve();
-  assert.equal(calls, 1);
-  const cancel = effects[0]();
-  cancel();
-  await Promise.resolve();
-  assert.equal(calls, 1);
+  assert.equal(calls, 0);
+  assert.deepEqual(effects, []);
+});
+
+test('an unconfigured workspace does not read any thread metadata', () => {
+  const { data, filter } = fixture('Empty');
+  const scope = { get() { assert.fail('Empty workspace should not materialize thread metadata'); } };
+  assert.deepEqual(filter.filterResult(data, scope).layout.chatKeys, []);
+  assert.deepEqual(filter.filterNative({ projectGroups: data.allCodexProjectGroups, threadKeys: ['hsb', 'roar'] }, scope).threadKeys, []);
+  assert.deepEqual(filter.filterPriority([{ kind: 'task', threadEntry: { key: 'hsb' } }], scope), []);
+});
+
+test('native matching uses known project roots before resolving thread metadata', () => {
+  const { data, filter } = fixture('HSB');
+  const scope = { get() { assert.fail('Matching project already supplies the thread folder'); } };
+  const result = filter.filterNative({ projectGroups: [data.allCodexProjectGroups[0]], threadKeys: ['hsb'] }, scope);
+  assert.deepEqual(result.threadKeys, ['hsb']);
 });
 
 test('priority and grouped recent items use explicit roots, including linked generic projects', () => {
