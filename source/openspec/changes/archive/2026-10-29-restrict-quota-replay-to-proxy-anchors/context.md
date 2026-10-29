@@ -17,4 +17,9 @@ This is fresh-request recovery, not migration of the old upstream session. Only 
 - The broader WebSocket, generate, sticky-routing, and quota-owner run passed 222 tests. The same unrelated HTTP goal-restart scope test remains excluded after its unchanged-base timeout was established in the preceding change.
 - All 351 selector and soft-sticky unit tests passed.
 - Targeted Ruff, formatting, type checks, and strict OpenSpec change validation passed.
-- Runtime deployment evidence is recorded after the corrected image is ready.
+
+## Deployment
+
+The running local service uses `codex-lb:quota-owner-9d91136d`, built from source revision `9d91136dcb37d30122e73a5463399f17d35b3824`. The packaged production modules matched the source SHA-256 hashes before rollout. The normal shutdown drain completed and `/health/ready` returned `status: ok` with `database: ok`.
+
+The code provenance audit establishes where the missing recovery path existed. It does not prove that this path alone caused the original chat incident: the captured logs also included selections with no preferred owner and no selected account, and affinity was manually changed before an end-to-end incident replay was captured.
