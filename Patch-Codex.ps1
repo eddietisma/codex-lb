@@ -352,10 +352,10 @@ function createWorkspaceFilter(react, jsx, threadAtom, projectKey, chatProjectKe
     const button = (label, active, onClick, extra = {}) => h('button', {
       type: 'button', onClick, ...extra,
       style: { flexShrink: 0, boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        height: 24, minHeight: 0, border: '1px solid var(--border-color, #6666)', borderRadius: 999,
+        height: 24, minHeight: 0, border: active ? '1px solid var(--color-token-text-primary, CanvasText)' : '1px solid var(--border-color, #6666)', borderRadius: 999,
         padding: label === '+' ? 0 : '0 8px', width: label === '+' ? 24 : undefined,
-        background: active ? 'var(--color-token-bg-secondary, #8883)' : 'transparent',
-        color: 'inherit', font: 'inherit', fontSize: 12, lineHeight: '16px', cursor: 'pointer', fontWeight: active ? 600 : 400 }, children: label,
+        background: active ? 'var(--color-token-text-primary, CanvasText)' : 'transparent',
+        color: active ? 'var(--color-token-bg-primary, Canvas)' : 'inherit', font: 'inherit', fontSize: 12, lineHeight: '16px', cursor: 'pointer', fontWeight: active ? 700 : 400 }, children: label,
     }, label);
     return h('div', { 'data-codex-lb-workspaces': true, style: { minWidth: 0, padding: '4px 12px', fontSize: 12, lineHeight: '16px' }, children: [
       h('div', { role: 'group', 'aria-label': 'Workspace filter',
