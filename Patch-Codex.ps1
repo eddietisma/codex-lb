@@ -726,12 +726,10 @@ function transformWebpackWorkspaces(sources) {
   let unified = code.slice(unifiedStart, unifiedEnd);
   // Workspace changes must also invalidate compiler-cached retention boundaries.
   unified = unified.replaceAll('JSON.stringify([', 'JSON.stringify([codexLbWorkspace.active(),');
-  const rootChildren = unique([...unified.matchAll(/children:\[([\w$]+),([\w$]+)\]\}\)\]\}\)\}/g)], 'unified sidebar controls slot');
-  unified = unified.replace(rootChildren[0], rootChildren[0].replace('children:[', `children:[(0,${jsx}.jsx)(codexLbWorkspace.Controls,{},"codex-lb-workspaces"),`));
   code = code.slice(0, unifiedStart) + unified + code.slice(unifiedEnd);
   const container = one(new RegExp(`function (${ID})\\((${ID})\\)\\{let ${ID}(?:,${ID})*=\\(0,${ID}\\.c\\)\\(\\d+\\),\\{activeThreadKey:${ID},activeThreadIsPinned:`, 'g'), 'native sidebar container');
   code = code.replace(container[0], container[0].replace('{let ', `{${container[2]}=codexLbWorkspace.withControls(${container[2]});let `));
-  changes.push({ name: 'workspace sidebar tabs', before: container[0], after: 'workspace controls in native and unified sidebars' });
+  changes.push({ name: 'workspace sidebar tabs', before: container[0], after: 'workspace controls in shared sidebar container' });
   const metadataCallback = `(scope,item)=>{let id=item.conversation?.gizmo_id??scope.get(${requireName}("MrGp").zn,item.conversation?.id??item.conversationId);return{localProjects:id==null?[]:Object.values(${requireName}("Wbxh").F6(scope.get,${requireName}("DBCl").Q2Y.LOCAL_PROJECTS)??{}).filter(project=>project.chatGptBacking?.projectId===id)}}`;
   const helper = `const codexLbWorkspace=(${createWorkspaceFilter.toString()})(()=>${React},()=>${jsx},()=>${threads}.hQ,id=>${projects}.eZ(id),id=>${projects}.ky(id),${metadataCallback});`;
   // Custom sections were added upstream. Apply the same membership rule to their rows.
