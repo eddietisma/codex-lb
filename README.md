@@ -6,6 +6,8 @@ The initial source snapshot is upstream https://github.com/Soju06/codex-lb at `f
 
 Local fixes preserve developer context and prewarm replay safety, recognize the Business Pro Lite plan identifier, parse multiline upstream WebSocket errors correctly, and normalize Responses-Lite parallel tool calls. The dashboard displays the internal `prolite` tier as `Pro 200` without changing its quotas or routing.
 
+`Patch-Codex.ps1` also fixes delegated chat permission inheritance when the desktop UI has no cached source permissions. It reads the source chat's current permissions from its owning app server and verifies the host before inheriting them. Missing source state, cross-host creation, and failed reads keep Codex's existing restricted fallback. This applies to new chats created through the patched app; existing chats retain their selected permissions. Prepare the runtime with `./Patch-Codex.ps1 -PrepareOnly`, then reopen Codex through the launcher when active work has finished.
+
 The upstream license and attribution files are retained in `source/`. The previous local clone remains under ignored `codex-lb/` for access to its original Git history. Edit `source/` for future changes.
 
 For native model catalogue discovery, set `api_key_model_discovery = true` under `[features]` in the client's `config.toml` and set `model_catalog_url` under `[model_providers.codex-lb]` to the LB's `/backend-api/codex/models` endpoint. Restart Codex after enabling discovery. Context window values then come from the LB's Model catalogue settings; no Desktop catalogue patch or numeric client context override is needed.
