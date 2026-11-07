@@ -556,6 +556,264 @@ function transformWorkspaceMetadata(source) {
   const after = `codexLbLocalProjects:${metadata[0][1]},codexLbAllProjectGroups:[...${metadata[0][2]},...${metadata[0][3]}.projectGroups],` + before;
   return { code: source.replace(before, after), changes: [{ name: 'workspace repository metadata', before, after }] };
 }
+async function readSourcePermissionSelection({ sourceHostId, destinationHostId, sourceThreadId, client, toAgentMode }) {
+  if (sourceHostId != null && sourceHostId !== destinationHostId) return null;
+  try {
+    const summary = await client.getThreadListSummary(sourceThreadId);
+    if (summary?.hostId !== destinationHostId) return null;
+    const permissions = await client.getCurrentPermissions(sourceThreadId);
+    if (permissions == null) return null;
+    const agentMode = toAgentMode(permissions);
+    if (agentMode == null) return null;
+    const context = await client.getFollowUpContext(sourceThreadId);
+    if (context?.cwd == null) return null;
+    return { agentMode, permissions, permissionProfileId: permissions.activePermissionProfile?.id ?? null, sourceCwd: context.cwd };
+  } catch {
+    // An unavailable or unverifiable source keeps the app's existing conservative fallback.
+    return null;
+  }
+}
+'use strict';
+
+function webpackModules(sources) {
+  const vm = require('node:vm'), result = [];
+  for (const [asset, source] of sources) {
+    if (!source.includes('export const __webpack_modules__=') || !['return{activeWorkspaceRoot:', '"user-saved-config"', '.modelProvider||null', 'ComposerContent:', 'canShowUsageBanners:', 'CodexComposerAdapter:', 'Explicit-host capability requires hostId:'].some(marker => source.includes(marker))) continue;
+    const modules = vm.runInNewContext(source.replaceAll('export const ', 'const ') + '\n;__webpack_modules__', Object.create(null), { timeout: 2000 });
+    for (const [id, fn] of Object.entries(modules)) {
+      const code = Function.prototype.toString.call(fn);
+      const signature = code.match(/^[\w$]+\(([^)]*)\)\{/);
+      if (!signature || !source.includes(code)) throw new Error('Unsupported webpack module: ' + id);
+      result.push({ asset, id, source: code, args: signature[1].split(','), body: code.slice(signature[0].length, -1) });
+    }
+  }
+  return result;
+}
+
+function transformWebpackUsage(sources) {
+  const ID = '[A-Za-z_$][\\w$]*', entries = webpackModules(sources), output = new Map(), changes = [];
+  const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const one = (code, regex, label) => {
+    const matches = [...code.matchAll(regex)];
+    if (matches.length !== 1) throw new Error('Unsupported webpack usage layout: ' + label + ' matched ' + matches.length + ' times');
+    return matches[0];
+  };
+  const select = (predicate, label) => {
+    const matches = entries.filter(predicate), ids = new Set(matches.map(entry => entry.id));
+    if (ids.size !== 1) throw new Error('Unsupported webpack usage module: ' + label + ' matched ' + ids.size + ' IDs');
+    return matches;
+  };
+  const exported = (entry, symbol, label) => one(entry.source, new RegExp(`(?:[,{])(${ID}):(?:\\(\\)=>)?${escape(symbol)}(?=[,}])`, 'g'), label)[1];
+  const target = select(entry => entry.source.includes('return{activeWorkspaceRoot:') && entry.source.includes('conversationHostId:'), 'execution target')[0];
+  const config = select(entry => entry.source.includes('"user-saved-config"') && entry.source.includes('failClosed') === false && /\(\{cwd:\w+=null,hostId:/.test(entry.source), 'effective config')[0];
+  const provider = select(entry => entry.source.includes('.modelProvider||null'), 'thread provider')[0];
+  const targetSymbol = one(target.source, new RegExp(`let (${ID})=\\(0,${ID}\\.i1\\)\\(.{0,750}?return\\{activeWorkspaceRoot:`, 'g'), 'target atom')[1];
+  const configSymbol = one(config.source, new RegExp(`let (${ID})=\\(0,${ID}\\.vU\\)\\(${ID}\\.${ID},\\(\\{cwd:`, 'g'), 'config atom')[1];
+  const providerSymbol = one(provider.source, new RegExp(`(${ID})=${ID}\\(\\(\\{summary:(${ID})\\}\\)=>\\2\\.modelProvider\\|\\|null\\)`, 'g'), 'provider atom')[1];
+  const refs = {
+    target: [target.id, exported(target, targetSymbol, 'target export')],
+    config: [config.id, exported(config, configSymbol, 'config export')],
+    provider: [provider.id, exported(provider, providerSymbol, 'provider export')],
+  };
+  const composer = select(entry => entry.source.includes('dataUpdatedAt:') && entry.source.includes('isUsageBannerEnabled:') && entry.source.includes('rateLimitWarningThreshold:') && entry.source.includes('selectedModel:') && entry.source.includes('ComposerContent:'), 'composer');
+  const quotaHead = one(composer[0].source, new RegExp(`sendBlocked:${ID}\\}=function\\((${ID})\\)\\{let .{0,100}?\\{hostId:(${ID}),selectedModel:(${ID})\\}=\\1,(${ID})=void 0===\\2\\?"local":\\2,(${ID})=\\(0,(${ID})\\.gh\\)\\((${ID})\\.(${ID})\\);`, 'g'), 'usage hook');
+  const scopeAlias = quotaHead[7];
+  const scopeModule = one(composer[0].source, new RegExp(`${escape(scopeAlias)}=${escape(composer[0].args[2])}\\("([^"]+)"\\)`, 'g'), 'scope module')[1];
+  const scopeResolver = one(composer[0].source.slice(quotaHead.index, quotaHead.index + 700), new RegExp(`\\(0,${escape(scopeAlias)}\\.(${ID})\\)\\(${escape(quotaHead[5])}\\)`, 'g'), 'thread resolver')[1];
+  const helpers = entry => {
+    const req = entry.args[2];
+    if (!req) throw new Error('Missing webpack require');
+    const ref = ([id, key]) => `${req}(${JSON.stringify(id)})[${JSON.stringify(key)}]`;
+    return `function codexLbExternalThread(thread,host){let read=${req}("zTeN")._U,target=read(${ref(refs.target)},thread),config=read(${ref(refs.config)},{cwd:target.cwd,hostId:thread==null?target.hostId:host}),provider=read(${ref(refs.provider)},thread);return (thread==null||target.hostId===host)&&(provider??config.data?.model_provider)==="codex-lb"}function codexLbCurrentThread(){return ${req}(${JSON.stringify(scopeModule)})[${JSON.stringify(scopeResolver)}](${req}("zTeN").gh(${req}(${JSON.stringify(scopeModule)})[${JSON.stringify(quotaHead[8])}]))}`;
+  };
+  const patch = (entry, edits, injectHelpers = true) => {
+    let code = entry.source;
+    if (code.includes('codexLbExternalThread')) throw new Error('Source already patched');
+    for (const { before, after, name } of edits) {
+      const index = code.indexOf(before);
+      if (index < 0 || code.indexOf(before, index + before.length) >= 0) throw new Error('Ambiguous webpack patch anchor: ' + name);
+      code = code.slice(0, index) + after + code.slice(index + before.length);
+      changes.push({ name, asset: entry.asset, module: entry.id, before, after });
+    }
+    if (injectHelpers) code = code.replace('{', '{' + helpers(entry));
+    const full = output.get(entry.asset) ?? sources.get(entry.asset);
+    if (full.indexOf(entry.source) !== full.lastIndexOf(entry.source)) throw new Error('Duplicate webpack module source');
+    output.set(entry.asset, full.replace(entry.source, () => code));
+  };
+  for (const entry of composer) {
+    const head = one(entry.source, new RegExp(`sendBlocked:${ID}\\}=function\\((${ID})\\)\\{let .{0,100}?\\{hostId:(${ID}),selectedModel:(${ID})\\}=\\1,(${ID})=void 0===\\2\\?"local":\\2,(${ID})=\\(0,(${ID})\\.gh\\)\\((${ID})\\.(${ID})\\);`, 'g'), 'composer usage hook');
+    const end = one(entry.source.slice(head.index), new RegExp(`rateLimitWarningThreshold:(${ID}),sendBlocked:(${ID})\\},.{0,350}?,(${ID})\\}\\((${ID})\\),`, 'g'), 'usage hook output');
+    const hook = entry.source.slice(head.index, head.index + end.index + end[0].length);
+    const thread = one(hook, new RegExp(`let (${ID})=(${ID}),${ID}="local"===${escape(head[5])}\\.value\\.kind`, 'g'), 'usage thread')[1];
+    const injection = one(hook, new RegExp(`let (${ID})=${ID}\\?\\?null,${ID}=\\(0,${ID}\\._U\\)\\(`, 'g'), 'usage provider hook insertion');
+    const tail = `,${end[3]}}(${end[4]}),`;
+    patch(entry, [
+      { name: 'composer usage provider', before: injection[0], after: `let codexLbExternal=codexLbExternalThread(${thread},${head[4]});` + injection[0] },
+      { name: 'composer usage output', before: tail, after: `,codexLbExternal?{...${end[3]},rateLimit:null,rateLimitWarningThreshold:null,isUsageBannerEnabled:!1,sendBlocked:!1}:${end[3]}}(${end[4]}),` },
+    ]);
+  }
+  const banners = select(entry => /\{canShowUsageBanners:[^}]{0,500}lowerPriorityContent:[^}]{0,300}\}=/.test(entry.source), 'usage banner');
+  for (const entry of banners) {
+    const guard = one(entry.source, new RegExp(`(${ID})=\\(0,(${ID})\\._U\\)\\(${ID}\\.${ID},(${ID})\\);if\\(!(${ID})\\)return (${ID});`, 'g'), 'banner guard');
+    patch(entry, [{ name: 'usage banner', before: guard[0], after: guard[0].slice(0, guard[0].indexOf(';') + 1) + `let codexLbExternal=codexLbExternalThread(codexLbCurrentThread(),${guard[3]});if(!${guard[4]}||codexLbExternal)return ${guard[5]};` }]);
+  }
+  const adapters = select(entry => entry.source.includes('CodexComposerAdapter:') && entry.source.includes('submitDisabled:'), 'composer adapter');
+  for (const entry of adapters) {
+    const quotaAlias = one(entry.source, new RegExp(`(${ID})=${escape(entry.args[2])}\\("a6kU"\\)`, 'g'), 'adapter workspace quota import')[1];
+    const hostQuotaAlias = one(entry.source, new RegExp(`(${ID})=${escape(entry.args[2])}\\("eLmE"\\)`, 'g'), 'adapter account quota import')[1];
+    const quota = one(entry.source, new RegExp(`(${ID})=\\(0,(${ID})\\.Ul\\)\\("local"===(${ID})&&${escape(quotaAlias)}\\.U\\)`, 'g'), 'adapter quota');
+    const hostQuota = one(entry.source, new RegExp(`(${ID})=\\(0,${escape(quota[2])}\\._U\\)\\(${escape(hostQuotaAlias)}\\.F9,${escape(quota[3])}\\)`, 'g'), 'adapter account quota');
+    const thread = one(entry.source, new RegExp(`${escape(quota[3])}=\\(0,${escape(quota[2])}\\._U\\)\\(${ID}\\.qX,(${ID})\\)`, 'g'), 'adapter thread')[1];
+    const submit = one(entry.source, new RegExp(`\\|\\|${escape(hostQuota[1])}\\|\\|${escape(quota[1])};`, 'g'), 'adapter submit quota');
+    patch(entry, [
+      { name: 'composer adapter quota', before: quota[0], after: `codexLbExternal=codexLbExternalThread(${thread},${quota[3]}),` + quota[0] + '&&!codexLbExternal' },
+      { name: 'composer account quota', before: submit[0], after: `||(${hostQuota[1]}&&!codexLbExternal)||${quota[1]};` },
+    ]);
+  }
+  const capabilities = select(entry => entry.source.includes('requiresFirstPartyInference&&') && entry.source.includes('Explicit-host capability requires hostId:'), 'capability provider gate');
+  for (const entry of capabilities) {
+    const gate = one(entry.source, new RegExp(`if\\((${ID})\\.requiresFirstPartyInference&&.{0,600}?isCapable:!(${ID})&&!(${ID})&&\\((${ID})\\?\\?"openai"\\)==="openai"\\}\\)\\}`, 'g'), 'capability gate');
+    const request = one(entry.source, new RegExp('Explicit-host capability requires hostId: \\$\\{(' + ID + ')\\.name\\}', 'g'), 'capability request')[1];
+    const comparison = `(${gate[4]}??"openai")==="openai"`;
+    const allowed = `(${request}.name==="dictation"||${request}.name.startsWith("dictation.")||${request}.name==="orbit"||${request}.name==="orbit.navigation")`;
+    // The block declares its own request-name variable in this build. Capture
+    // the outer request before entering it to avoid shadowing that variable.
+    patch(entry, [{ name: 'dictation and dot provider', before: gate[0], after: `let codexLbProviderCapability=${allowed};` + gate[0].replace(comparison, `(${comparison}||codexLbProviderCapability&&${gate[4]}==="codex-lb")`) }], false);
+  }
+  return { output, changes };
+}
+function transformWebpackWorkspaces(sources) {
+  const assert = require('node:assert/strict'), vm = require('node:vm');
+  const output = new Map(), changes = [], modules = [];
+  for (const [file, source] of sources) {
+    if (!source.includes('export const __webpack_modules__=') || !source.includes('orderedPinnedProjectGroups:')) continue;
+    const table = vm.runInNewContext(source.replaceAll('export const ', 'const ') + '\n;__webpack_modules__', Object.create(null), { timeout: 1000 });
+    for (const [id, fn] of Object.entries(table)) modules.push({ file, id, code: fn.toString() });
+  }
+  const unique = (items, label) => { assert.equal(items.length, 1, 'Unsupported app layout: ' + label); return items[0]; };
+  const sidebar = unique(modules.filter(item => item.code.includes('{orderedPinnedProjectGroups:') && item.code.includes('activeThreadIsPinned:')), 'webpack sidebar');
+  const metadata = unique(modules.filter(item => item.code.includes('localProjects:') && item.code.includes('resolvedProjectsWithThreads:[') && item.code.includes('orderedPinnedProjectGroups:')), 'webpack workspace metadata');
+  const ID = '[A-Za-z_$][\\w$]*', esc = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let code = sidebar.code;
+  const one = (pattern, label) => unique([...code.matchAll(pattern)], label);
+  const requireName = code.match(/^[^(]+\([^,]+,[^,]+,([^,)]+)\)/)[1];
+  const imported = id => one(new RegExp(`(${ID})=${esc(requireName)}\\("${id}"\\)`, 'g'), 'sidebar import ' + id)[1];
+  const React = imported('zd8w'), jsx = imported('ABep'), atoms = imported('zTeN'), root = imported('OWtl');
+  const projects = imported('FHI1'), threads = imported('r6TF'), native = imported('DZgh'), priority = imported('Gjlg');
+  const scopeCall = `(0,${atoms}.gh)(${root}.u)`;
+  const selector = one(new RegExp(`(${ID})=\\(0,${esc(atoms)}\\._U\\)\\((${ID})\\.(${ID}),(${ID})\\),\\{orderedPinnedProjectGroups:`, 'g'), 'unified sidebar selector');
+  const scope = 'codexLbWorkspaceScope';
+  function wrapCalls(pattern, expected, method, label) {
+    const found = [...code.matchAll(pattern)];
+    assert.equal(found.length, expected, 'Unsupported app layout: ' + label);
+    const functions = new Set();
+    for (const match of [...found].reverse()) {
+      const at = code.lastIndexOf('function ', match.index), head = code.slice(at, code.indexOf('{', at) + 1);
+      assert(/^function [\w$]+\([^)]*\)\{$/.test(head), 'Unsupported app layout: ' + label + ' component');
+      functions.add(head);
+      code = code.slice(0, match.index) + `codexLbWorkspace.${method}(${match[0]},${scope})` + code.slice(match.index + match[0].length);
+    }
+    for (const head of functions) {
+      if (!code.includes(head + `let ${scope}=`)) code = code.replace(head, head + `let ${scope}=${scopeCall};`);
+    }
+    changes.push({ name: label, before: found.map(item => item[0]).join(';'), after: `${expected} workspace-filtered reads` });
+  }
+  wrapCalls(new RegExp(`\\(0,${esc(atoms)}\\._U\\)\\(${esc(selector[2])}\\.${esc(selector[3])},${esc(selector[4])}\\)`, 'g'), 1, 'filterResult', 'workspace sidebar filtering');
+  wrapCalls(new RegExp(`\\(0,${esc(atoms)}\\._U\\)\\(${esc(native)}\\.sS,(${ID}|"codex")\\)`, 'g'), 2, 'filterNative', 'workspace native sidebar filtering');
+  wrapCalls(new RegExp(`\\(0,${esc(atoms)}\\._U\\)\\(${esc(priority)}\\.(Be|p1|Vr|jU),(${ID}|"codex")\\)`, 'g'), 6, 'filterPriority', 'workspace priority filtering');
+  const unifiedAt = code.indexOf('codexLbWorkspace.filterResult('), unifiedStart = code.lastIndexOf('function ', unifiedAt), unifiedEnd = code.indexOf('}function ', unifiedAt) + 1;
+  assert(unifiedEnd > unifiedAt, 'Unsupported app layout: unified sidebar boundary');
+  let unified = code.slice(unifiedStart, unifiedEnd);
+  // Workspace changes must also invalidate compiler-cached retention boundaries.
+  unified = unified.replaceAll('JSON.stringify([', 'JSON.stringify([codexLbWorkspace.active(),');
+  const rootChildren = unique([...unified.matchAll(/children:\[([\w$]+),([\w$]+)\]\}\)\]\}\)\}/g)], 'unified sidebar controls slot');
+  unified = unified.replace(rootChildren[0], rootChildren[0].replace('children:[', `children:[(0,${jsx}.jsx)(codexLbWorkspace.Controls,{},"codex-lb-workspaces"),`));
+  code = code.slice(0, unifiedStart) + unified + code.slice(unifiedEnd);
+  const container = one(new RegExp(`function (${ID})\\((${ID})\\)\\{let ${ID}(?:,${ID})*=\\(0,${ID}\\.c\\)\\(\\d+\\),\\{activeThreadKey:${ID},activeThreadIsPinned:`, 'g'), 'native sidebar container');
+  code = code.replace(container[0], container[0].replace('{let ', `{${container[2]}=codexLbWorkspace.withControls(${container[2]});let `));
+  changes.push({ name: 'workspace sidebar tabs', before: container[0], after: 'workspace controls in native and unified sidebars' });
+  const metadataCallback = `(scope,item)=>{let id=item.conversation?.gizmo_id??scope.get(${requireName}("MrGp").zn,item.conversation?.id??item.conversationId);return{localProjects:id==null?[]:Object.values(${requireName}("Wbxh").F6(scope.get,${requireName}("DBCl").Q2Y.LOCAL_PROJECTS)??{}).filter(project=>project.chatGptBacking?.projectId===id)}}`;
+  const helper = `const codexLbWorkspace=(${createWorkspaceFilter.toString()})(()=>${React},()=>${jsx},()=>${threads}.hQ,id=>${projects}.eZ(id),id=>${projects}.ky(id),${metadataCallback});`;
+  // Custom sections were added upstream. Apply the same membership rule to their rows.
+  const custom = `const codexLbWorkspaceBaseFilter=codexLbWorkspace.filterResult,codexLbWorkspaceSections=new WeakMap;codexLbWorkspace.filterResult=(data,scope)=>{let result=codexLbWorkspaceBaseFilter(data,scope);if(result===data||!result.customSectionsState)return result;let cached=codexLbWorkspaceSections.get(result);if(cached)return cached;let allowed=key=>result.conversationByKey.has(key)||result.entries.some(item=>item.kind==="project"&&item.key===key),sections=result.customSectionsState.sections.map(section=>({...section,itemKeys:section.itemKeys.filter(allowed)})).filter(section=>section.itemKeys.length);cached={...result,customSectionsState:{...result.customSectionsState,sections},customSectionItemKeys:new Set(sections.flatMap(section=>section.itemKeys))};codexLbWorkspaceSections.set(result,cached);return cached};`;
+  code = code.replace('{', () => '{' + helper + custom);
+  output.set(sidebar.file, sources.get(sidebar.file).replace(sidebar.code, () => code));
+  const found = unique([...metadata.code.matchAll(new RegExp(`localProjects:(${ID}),resolvedProjectsWithThreads:\\[\\.\\.\\.(${ID}),\\.\\.\\.(${ID})\\.projectGroups\\]`, 'g'))], 'workspace metadata local projects');
+  assert.equal(metadata.code.split('orderedPinnedProjectGroups:').length, 2, 'Unsupported app layout: workspace metadata result');
+  const before = 'orderedPinnedProjectGroups:', after = `codexLbLocalProjects:${found[1]},codexLbAllProjectGroups:[...${found[2]},...${found[3]}.projectGroups],` + before;
+  const original = output.get(metadata.file) ?? sources.get(metadata.file);
+  output.set(metadata.file, original.replace(metadata.code, () => metadata.code.replace(before, () => after)));
+  changes.push({ name: 'workspace repository metadata', before, after });
+  return { output, changes };
+}
+function transformWebpackPermissions(sources) {
+  const output = new Map(), changes = [];
+  const ID = '[A-Za-z_$][\\w$]*';
+  const esc = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let copies = 0;
+  for (const [asset, source] of sources) {
+    if (!source.includes('sourcePermissionSelection:')) continue;
+    const modules = require('node:vm').runInNewContext(source.replaceAll('export const ', 'const ') + '\n;__webpack_modules__', Object.create(null), { timeout: 1000 });
+    if (!modules.eYlV) continue;
+    const originalModule = modules.eYlV.toString();
+    const calls = [...originalModule.matchAll(new RegExp(`sourcePermissionSelection:(${ID})\\(`, 'g'))];
+    assert.equal(calls.length, 2, 'Unsupported webpack delegated permission call sites');
+    assert.equal(calls[0][1], calls[1][1], 'Unsupported webpack delegated permission resolver');
+    const name = calls[0][1];
+    const at = originalModule.indexOf('function ' + name + '(');
+    const end = originalModule.indexOf('function ', at + 9);
+    assert(at >= 0 && end > at, 'Unsupported webpack delegated permission helper');
+    const original = originalModule.slice(at, end).trimEnd();
+    const pattern = new RegExp(`^function ${esc(name)}\\((${ID}),(${ID}),(${ID}),(${ID}),(${ID})\\)\\{if\\(null==\\2\\)return null;let (${ID})=\\(0,(${ID})\\.JXB\\)\\(\\2\\);if\\(null!=\\4\\)\\{if\\(\\4!==\\3\\)return null\\}else if\\(\\1\\.get\\((${ID})\\.Qk,\\6\\)!==\\3\\)return null;let (${ID})=\\1\\.get\\(\\8\\.we,\\6\\),(${ID})=\\1\\.get\\(\\8\\.JN,\\6\\),(${ID})=null!=\\5&&\\10===\\5&&\\1\\.get\\((${ID})\\.a,\\3\\)\\?\\(0,(${ID})\\.o\\)\\(\\9,\\1\\.get\\(\\8\\.h2,\\6\\)\\):\\9;if\\(null==\\11\\)return null;let (${ID})=\\(0,\\7\\.weu\\)\\(\\11\\);return null==\\14\\?null:\\{agentMode:\\14,permissions:\\11,permissionProfileId:\\11\\.activePermissionProfile\\?\\.id\\?\\?null,sourceCwd:\\10\\}\\}$`);
+    const m = original.match(pattern);
+    assert(m, 'Unsupported webpack delegated permission helper changed');
+    const client = [...new Set([...originalModule.matchAll(new RegExp(`await \\(0,(${ID})\\.V\\)\\(${ID},${ID}\\)\\.sendRequest\\("config/read"`, 'g'))].map(match => match[1]))];
+    assert.equal(client.length, 1, 'Unsupported webpack owning app-server client');
+    const [, scope, thread, host, sourceHost, cwd, key, threadApi, atoms, permissions, sourceCwd] = m;
+    const oldHead = original.slice(0, original.indexOf(`let ${permissions}=`));
+    const replacement = `async function ${name}(${scope},${thread},${host},${sourceHost},${cwd}){if(null==${thread})return null;let ${key}=(0,${threadApi}.JXB)(${thread});let codexLbSource=await codexLbReadSourcePermissions({sourceHostId:${sourceHost}??${scope}.get(${atoms}.Qk,${key}),destinationHostId:${host},sourceThreadId:${key},client:(0,${client[0]}.V)(${scope},${host}),toAgentMode:${threadApi}.weu});if(codexLbSource==null)return null;` + original.slice(oldHead.length).replace(`${permissions}=${scope}.get(${atoms}.we,${key}),${sourceCwd}=${scope}.get(${atoms}.JN,${key})`, `${permissions}=codexLbSource.permissions,${sourceCwd}=codexLbSource.sourceCwd`);
+    let changedModule = originalModule.replace(original, () => replacement);
+    changedModule = changedModule.replace(new RegExp(`sourcePermissionSelection:${esc(name)}\\(`, 'g'), `sourcePermissionSelection:await ${name}(`);
+    const brace = changedModule.indexOf('{');
+    changedModule = changedModule.slice(0, brace + 1) + `const codexLbReadSourcePermissions=(${readSourcePermissionSelection.toString()});` + changedModule.slice(brace + 1);
+    assert.equal(source.split(originalModule).length, 2, 'Ambiguous webpack delegated permissions module');
+    output.set(asset, source.replace(originalModule, () => changedModule));
+    copies++;
+  }
+  assert(copies > 0, 'Missing webpack delegated permissions module');
+  changes.push({ name: 'delegated source permissions from owning app server', copies });
+  return { output, changes };
+}
+function transformThreadPermissions(source) {
+  const ID = '[A-Za-z_$][\\w$]*';
+  const callPattern = new RegExp(`sourcePermissionSelection:((?:${ID}\\.type===\x60codexCloud\x60\\?null:)?)(${ID})\\(`, 'g');
+  const calls = [...source.matchAll(callPattern)];
+  assert.equal(calls.length, 2, 'Unsupported app layout: delegated permission call sites');
+  assert.equal(calls[0][2], calls[1][2], 'Unsupported app layout: delegated permission resolver');
+  const name = calls[0][2];
+  const start = source.indexOf(`function ${name}(`);
+  const end = source.indexOf('function ', start + 9);
+  assert(start >= 0 && end > start, 'Unsupported app layout: source permission helper');
+  const original = source.slice(start, end);
+  const args = original.match(new RegExp(`^function ${name.replace(/[$]/g, '\\$&')}\\((${ID}),(${ID}),(${ID}),(${ID})\\)`));
+  assert(args, 'Unsupported app layout: source permission arguments');
+  const [, scope, thread, host, sourceHost] = args;
+  const key = original.match(new RegExp(`let (${ID})=(${ID})\\(${thread}\\)`));
+  const permission = original.match(new RegExp(`let (${ID})=${scope}\\.get\\((${ID}),${key?.[1]}\\)`));
+  const mode = original.match(new RegExp(`let (${ID})=(${ID})\\(${permission?.[1]}\\)`));
+  const hostAtom = original.match(new RegExp(`else if\\(${scope}\\.get\\((${ID}),${key?.[1]}\\)!==${host}\\)return null`));
+  const cwdAtom = original.match(new RegExp(`sourceCwd:${scope}\\.get\\((${ID}),${key?.[1]}\\)`));
+  const clients = [...new Set([...source.matchAll(new RegExp(`await (${ID})\\((${ID}),(${ID})\\)\\.sendRequest\\(\x60config/read\x60`, 'g'))].map(match => match[1]))];
+  assert(key && permission && mode && hostAtom && cwdAtom, 'Unsupported app layout: source permission ownership');
+  assert.equal(clients.length, 1, 'Unsupported app layout: owning app-server client');
+  const expected = `function ${name}(${scope},${thread},${host},${sourceHost}){if(${thread}==null)return null;let ${key[1]}=${key[2]}(${thread});if(${sourceHost}!=null){if(${sourceHost}!==${host})return null}else if(${scope}.get(${hostAtom[1]},${key[1]})!==${host})return null;let ${permission[1]}=${scope}.get(${permission[2]},${key[1]});if(${permission[1]}==null)return null;let ${mode[1]}=${mode[2]}(${permission[1]});return ${mode[1]}==null?null:{agentMode:${mode[1]},permissions:${permission[1]},permissionProfileId:${permission[1]}.activePermissionProfile?.id??null,sourceCwd:${scope}.get(${cwdAtom[1]},${key[1]})}}`;
+  assert.equal(original.trim(), expected, 'Unsupported app layout: source permission helper changed');
+  const replacement = `async function ${name}(${scope},${thread},${host},${sourceHost}){if(${thread}==null)return null;let ${key[1]}=${key[2]}(${thread});return codexLbReadSourcePermissions({sourceHostId:${sourceHost}??${scope}.get(${hostAtom[1]},${key[1]}),destinationHostId:${host},sourceThreadId:${key[1]},client:${clients[0]}(${scope},${host}),toAgentMode:${mode[2]}})}`;
+  let code = source.slice(0, start) + replacement + source.slice(end);
+  code = code.replace(callPattern, (_, guard, resolver) => `sourcePermissionSelection:${guard}await ${resolver}(`);
+  code = `const codexLbReadSourcePermissions=(${readSourcePermissionSelection.toString()});` + code;
+  return { code, changes: [{ name: 'delegated source permissions from owning app server', before: original, after: replacement }] };
+}
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 function hashFile(file) {
   const fd = fs.openSync(file, 'r'), chunk = Buffer.alloc(4194304), hash = crypto.createHash('sha256');
@@ -595,30 +853,43 @@ function analyze(appDir) {
   const executable = path.join(appDir, 'ChatGPT.exe');
   const archive = openArchive(archivePath);
   try {
-    const assets = [...archive.entries.keys()].filter(key => /^webview\/assets\/app-primary-[^/]+\.js$/.test(key));
-    assert.equal(assets.length, 1, 'Expected one primary UI bundle; app layout changed');
-    const cache = new Map();
-    const readFile = key => {
-      if (!cache.has(key)) cache.set(key, archive.read(key).toString('utf8'));
-      return cache.get(key);
-    };
     let output, changes;
-    const splitAssets = [...archive.entries.keys()].filter(key => /^webview\/assets\/(?:app-primary|app-initial|composer-content|codex-composer-adapter)-[^/]+\.js$/.test(key));
-    if (splitAssets.some(key => key.includes('/composer-content-'))) {
-      ({ output, changes } = transformSplit(new Map(splitAssets.map(key => [key, readFile(key)])), readFile));
+    const webpackAssets = [...archive.entries.keys()].filter(key => /^webview\/assets\/async\/[^/]+\.js$/.test(key));
+    if (webpackAssets.length) {
+      const sources = new Map(webpackAssets.map(key => [key, archive.read(key).toString('utf8')]));
+      output = new Map(); changes = [];
+      for (const patch of [transformWebpackUsage, transformWebpackWorkspaces, transformWebpackPermissions]) {
+        const result = patch(sources);
+        for (const [asset, code] of result.output) { sources.set(asset, code); output.set(asset, code); }
+        changes.push(...result.changes);
+      }
     } else {
-      const transformed = transform(readFile(assets[0]), assets[0], readFile);
-      output = new Map([[assets[0], transformed.code]]);
-      changes = transformed.changes;
+      const assets = [...archive.entries.keys()].filter(key => /^webview\/assets\/app-primary-[^/]+\.js$/.test(key));
+      assert.equal(assets.length, 1, 'Expected one primary UI bundle; app layout changed');
+      const cache = new Map();
+      const readFile = key => {
+        if (!cache.has(key)) cache.set(key, archive.read(key).toString('utf8'));
+        return cache.get(key);
+      };
+      const splitAssets = [...archive.entries.keys()].filter(key => /^webview\/assets\/(?:app-primary|app-initial|composer-content|codex-composer-adapter)-[^/]+\.js$/.test(key));
+      if (splitAssets.some(key => key.includes('/composer-content-'))) {
+        ({ output, changes } = transformSplit(new Map(splitAssets.map(key => [key, readFile(key)])), readFile));
+      } else {
+        const transformed = transform(readFile(assets[0]), assets[0], readFile);
+        output = new Map([[assets[0], transformed.code]]);
+        changes = transformed.changes;
+      }
+      const workspace = transformWorkspaces(output.get(assets[0]) ?? readFile(assets[0]));
+      output.set(assets[0], workspace.code);
+      changes.push(...workspace.changes);
+      const initialAssets = [...archive.entries.keys()].filter(key => /^webview\/assets\/app-initial-[^/]+\.js$/.test(key));
+      assert.equal(initialAssets.length, 1, 'Unsupported app layout: workspace metadata bundle');
+      const metadata = transformWorkspaceMetadata(output.get(initialAssets[0]) ?? readFile(initialAssets[0]));
+      const permissions = transformThreadPermissions(metadata.code);
+      output.set(initialAssets[0], permissions.code);
+      changes.push(...metadata.changes);
+      changes.push(...permissions.changes);
     }
-    const workspace = transformWorkspaces(output.get(assets[0]) ?? readFile(assets[0]));
-    output.set(assets[0], workspace.code);
-    changes.push(...workspace.changes);
-    const initialAssets = [...archive.entries.keys()].filter(key => /^webview\/assets\/app-initial-[^/]+\.js$/.test(key));
-    assert.equal(initialAssets.length, 1, 'Unsupported app layout: workspace metadata bundle');
-    const metadata = transformWorkspaceMetadata(output.get(initialAssets[0]) ?? readFile(initialAssets[0]));
-    output.set(initialAssets[0], metadata.code);
-    changes.push(...metadata.changes);
     const modifications = new Map();
     for (const [asset, code] of output) {
       const original = archive.read(asset);
@@ -767,7 +1038,7 @@ if (true) {
     else console.log(JSON.stringify(build(source, output), null, 2));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
-module.exports = { analyze, build, cached, openArchive, createWorkspaceFilter, transformWorkspaces };
+module.exports = { transformWebpackUsage, transformWebpackWorkspaces, transformWebpackPermissions, analyze, build, cached, openArchive, createWorkspaceFilter, transformWorkspaces, readSourcePermissionSelection, transformThreadPermissions };
 '@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
