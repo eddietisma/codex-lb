@@ -664,10 +664,9 @@ function transformWebpackUsage(sources) {
     const quota = one(entry.source, new RegExp(`(${ID})=\\(0,(${ID})\\.Ul\\)\\("local"===(${ID})&&${escape(quotaAlias)}\\.U\\)`, 'g'), 'adapter quota');
     const hostQuota = one(entry.source, new RegExp(`(${ID})=\\(0,${escape(quota[2])}\\._U\\)\\(${escape(hostQuotaAlias)}\\.F9,${escape(quota[3])}\\)`, 'g'), 'adapter account quota');
     const thread = one(entry.source, new RegExp(`${escape(quota[3])}=\\(0,${escape(quota[2])}\\._U\\)\\(${ID}\\.qX,(${ID})\\)`, 'g'), 'adapter thread')[1];
-    const submit = one(entry.source, new RegExp(`\\|\\|${escape(hostQuota[1])}\\|\\|${escape(quota[1])};`, 'g'), 'adapter submit quota');
     patch(entry, [
-      { name: 'composer adapter quota', before: quota[0], after: `codexLbExternal=codexLbExternalThread(${thread},${quota[3]}),` + quota[0] + '&&!codexLbExternal' },
-      { name: 'composer account quota', before: submit[0], after: `||(${hostQuota[1]}&&!codexLbExternal)||${quota[1]};` },
+      { name: 'composer account quota', before: hostQuota[0], after: `codexLbExternal=codexLbExternalThread(${thread},${quota[3]}),` + hostQuota[0] + '&&!codexLbExternal' },
+      { name: 'composer adapter quota', before: quota[0], after: quota[0] + '&&!codexLbExternal' },
     ]);
   }
   const capabilities = select(entry => entry.source.includes('requiresFirstPartyInference&&') && entry.source.includes('Explicit-host capability requires hostId:'), 'capability provider gate');
