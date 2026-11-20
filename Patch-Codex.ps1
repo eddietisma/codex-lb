@@ -608,7 +608,7 @@ function transformWebpackUsage(sources) {
   const config = select(entry => entry.source.includes('"user-saved-config"') && entry.source.includes('failClosed') === false && /\(\{cwd:\w+=null,hostId:/.test(entry.source), 'effective config')[0];
   const provider = select(entry => entry.source.includes('.modelProvider||null'), 'thread provider')[0];
   const targetSymbol = one(target.source, new RegExp(`let (${ID})=\\(0,${ID}\\.i1\\)\\(.{0,750}?return\\{activeWorkspaceRoot:`, 'g'), 'target atom')[1];
-  const configSymbol = one(config.source, new RegExp(`let (${ID})=\\(0,${ID}\\.vU\\)\\(${ID}\\.${ID},\\(\\{cwd:`, 'g'), 'config atom')[1];
+  const configSymbol = one(config.source, new RegExp(`(?:let |,)(${ID})=\\(0,${ID}\\.vU\\)\\(${ID}\\.${ID},\\(\\{cwd:`, 'g'), 'config atom')[1];
   const providerSymbol = one(provider.source, new RegExp(`(${ID})=${ID}\\(\\(\\{summary:(${ID})\\}\\)=>\\2\\.modelProvider\\|\\|null\\)`, 'g'), 'provider atom')[1];
   const refs = {
     target: [target.id, exported(target, targetSymbol, 'target export')],
@@ -616,15 +616,19 @@ function transformWebpackUsage(sources) {
     provider: [provider.id, exported(provider, providerSymbol, 'provider export')],
   };
   const composer = select(entry => entry.source.includes('dataUpdatedAt:') && entry.source.includes('isUsageBannerEnabled:') && entry.source.includes('rateLimitWarningThreshold:') && entry.source.includes('selectedModel:') && entry.source.includes('ComposerContent:'), 'composer');
-  const quotaHead = one(composer[0].source, new RegExp(`sendBlocked:${ID}\\}=function\\((${ID})\\)\\{let .{0,100}?\\{hostId:(${ID}),selectedModel:(${ID})\\}=\\1,(${ID})=void 0===\\2\\?"local":\\2,(${ID})=\\(0,(${ID})\\.gh\\)\\((${ID})\\.(${ID})\\);`, 'g'), 'usage hook');
-  const scopeAlias = quotaHead[7];
-  const scopeModule = one(composer[0].source, new RegExp(`${escape(scopeAlias)}=${escape(composer[0].args[2])}\\("([^"]+)"\\)`, 'g'), 'scope module')[1];
+  const importedModule = (entry, local, label) => one(entry.source, new RegExp(`(?:[ ,])${escape(local)}=${escape(entry.args[2])}\\("([^"]+)"\\)`, 'g'), label)[1];
+  const usageHead = (entry, label) => one(entry.source, new RegExp(`sendBlocked:${ID}\\}=function\\((${ID})\\)\\{let .{0,150}?\\{hostId:(${ID}),selectedModel:(${ID})(?:,settings:${ID})?\\}=\\1,(${ID})=void 0===\\2\\?"local":\\2,(${ID})=\\(0,(${ID})\\.gh\\)\\((${ID})\\.(${ID})\\);`, 'g'), label);
+  const quotaHead = usageHead(composer[0], 'usage hook');
+  const atomModule = importedModule(composer[0], quotaHead[6], 'atom hooks module');
+  if (!['zTeN', 'qmMi'].includes(atomModule)) throw new Error('Unsupported webpack atom hooks module: ' + atomModule);
+  const hostQuotaReason = atomModule === 'qmMi';
+  const scopeAlias = quotaHead[7], scopeModule = importedModule(composer[0], scopeAlias, 'scope module');
   const scopeResolver = one(composer[0].source.slice(quotaHead.index, quotaHead.index + 700), new RegExp(`\\(0,${escape(scopeAlias)}\\.(${ID})\\)\\(${escape(quotaHead[5])}\\)`, 'g'), 'thread resolver')[1];
   const helpers = entry => {
     const req = entry.args[2];
     if (!req) throw new Error('Missing webpack require');
     const ref = ([id, key]) => `${req}(${JSON.stringify(id)})[${JSON.stringify(key)}]`;
-    return `function codexLbExternalThread(thread,host){let read=${req}("zTeN")._U,target=read(${ref(refs.target)},thread),config=read(${ref(refs.config)},{cwd:target.cwd,hostId:thread==null?target.hostId:host}),provider=read(${ref(refs.provider)},thread);return (thread==null||target.hostId===host)&&(provider??config.data?.model_provider)==="codex-lb"}function codexLbCurrentThread(){return ${req}(${JSON.stringify(scopeModule)})[${JSON.stringify(scopeResolver)}](${req}("zTeN").gh(${req}(${JSON.stringify(scopeModule)})[${JSON.stringify(quotaHead[8])}]))}`;
+    return `function codexLbExternalThread(thread,host){let read=${req}(${JSON.stringify(atomModule)})._U,target=read(${ref(refs.target)},thread),config=read(${ref(refs.config)},{cwd:target.cwd,hostId:thread==null?target.hostId:host}),provider=read(${ref(refs.provider)},thread);return (thread==null||target.hostId===host)&&(provider??config.data?.model_provider)==="codex-lb"}function codexLbCurrentThread(){return ${req}(${JSON.stringify(scopeModule)})[${JSON.stringify(scopeResolver)}](${req}(${JSON.stringify(atomModule)}).gh(${req}(${JSON.stringify(scopeModule)})[${JSON.stringify(quotaHead[8])}]))}`;
   };
   const patch = (entry, edits, injectHelpers = true) => {
     let code = entry.source;
@@ -641,37 +645,57 @@ function transformWebpackUsage(sources) {
     output.set(entry.asset, full.replace(entry.source, () => code));
   };
   for (const entry of composer) {
-    const head = one(entry.source, new RegExp(`sendBlocked:${ID}\\}=function\\((${ID})\\)\\{let .{0,100}?\\{hostId:(${ID}),selectedModel:(${ID})\\}=\\1,(${ID})=void 0===\\2\\?"local":\\2,(${ID})=\\(0,(${ID})\\.gh\\)\\((${ID})\\.(${ID})\\);`, 'g'), 'composer usage hook');
+    const head = usageHead(entry, 'composer usage hook');
     const end = one(entry.source.slice(head.index), new RegExp(`rateLimitWarningThreshold:(${ID}),sendBlocked:(${ID})\\},.{0,350}?,(${ID})\\}\\((${ID})\\),`, 'g'), 'usage hook output');
     const hook = entry.source.slice(head.index, head.index + end.index + end[0].length);
-    const thread = one(hook, new RegExp(`let (${ID})=(${ID}),${ID}="local"===${escape(head[5])}\\.value\\.kind`, 'g'), 'usage thread')[1];
-    const injection = one(hook, new RegExp(`let (${ID})=${ID}\\?\\?null,${ID}=\\(0,${ID}\\._U\\)\\(`, 'g'), 'usage provider hook insertion');
+    const thread = one(hook, new RegExp(`let (${ID})=(${ID}),(${ID})="local"===${escape(head[5])}\\.value\\.kind`, 'g'), 'usage thread');
+    const injection = hostQuotaReason ? thread : one(hook, new RegExp(`let (${ID})=${ID}\\?\\?null,${ID}=\\(0,${ID}\\._U\\)\\(`, 'g'), 'usage provider hook insertion');
+    // The settings-aware hook uses the main-thread flag to trigger automatic quota-related model fallback.
+    const providerCheck = hostQuotaReason
+      ? `let ${thread[1]}=${thread[2]},codexLbExternal=codexLbExternalThread(${thread[1]},${head[4]}),${thread[3]}=!codexLbExternal&&"local"===${head[5]}.value.kind`
+      : `let codexLbExternal=codexLbExternalThread(${thread[1]},${head[4]});` + injection[0];
     const tail = `,${end[3]}}(${end[4]}),`;
     patch(entry, [
-      { name: 'composer usage provider', before: injection[0], after: `let codexLbExternal=codexLbExternalThread(${thread},${head[4]});` + injection[0] },
+      { name: 'composer usage provider', before: injection[0], after: providerCheck },
       { name: 'composer usage output', before: tail, after: `,codexLbExternal?{...${end[3]},rateLimit:null,rateLimitWarningThreshold:null,isUsageBannerEnabled:!1,sendBlocked:!1}:${end[3]}}(${end[4]}),` },
     ]);
   }
-  const banners = select(entry => /\{canShowUsageBanners:[^}]{0,500}lowerPriorityContent:[^}]{0,300}\}=/.test(entry.source), 'usage banner');
-  for (const entry of banners) {
-    const guard = one(entry.source, new RegExp(`(${ID})=\\(0,(${ID})\\._U\\)\\(${ID}\\.${ID},(${ID})\\);if\\(!(${ID})\\)return (${ID});`, 'g'), 'banner guard');
-    patch(entry, [{ name: 'usage banner', before: guard[0], after: guard[0].slice(0, guard[0].indexOf(';') + 1) + `let codexLbExternal=codexLbExternalThread(codexLbCurrentThread(),${guard[3]});if(!${guard[4]}||codexLbExternal)return ${guard[5]};` }]);
+  if (hostQuotaReason) {
+    const banners = select(entry => /\{canShowUsageBanners:[^,]+,imageGenerationLimit:null,onDismissImageGenerationLimit:null,rateLimit:/.test(entry.source) && entry.source.includes('.hardBlocked'), 'standalone usage state');
+    for (const entry of banners) {
+      const state = one(entry.source, new RegExp(`let (${ID})=(${ID})\\.hardBlocked\\|\\|(${ID});return (?=[^;]{0,350}\\{canShowUsageBanners:(${ID}),imageGenerationLimit:null,onDismissImageGenerationLimit:null,rateLimit:(${ID}),sendBlocked:\\1\\})`, 'g'), 'standalone usage state');
+      patch(entry, [{ name: 'usage banner', before: state[0], after: state[0].replace('return ', `if(codexLbExternalThread(codexLbCurrentThread(),"local")){${state[1]}=!1;${state[4]}=!1;${state[5]}=null}return `) }]);
+    }
+  } else {
+    const banners = select(entry => /\{canShowUsageBanners:[^}]{0,500}lowerPriorityContent:[^}]{0,300}\}=/.test(entry.source), 'usage banner');
+    for (const entry of banners) {
+      const guard = one(entry.source, new RegExp(`(${ID})=\\(0,(${ID})\\._U\\)\\(${ID}\\.${ID},(${ID})\\);if\\(!(${ID})\\)return (${ID});`, 'g'), 'banner guard');
+      patch(entry, [{ name: 'usage banner', before: guard[0], after: guard[0].slice(0, guard[0].indexOf(';') + 1) + `let codexLbExternal=codexLbExternalThread(codexLbCurrentThread(),${guard[3]});if(!${guard[4]}||codexLbExternal)return ${guard[5]};` }]);
+    }
   }
   const adapters = select(entry => entry.source.includes('CodexComposerAdapter:') && entry.source.includes('submitDisabled:'), 'composer adapter');
   for (const entry of adapters) {
     const quotaAlias = one(entry.source, new RegExp(`(${ID})=${escape(entry.args[2])}\\("a6kU"\\)`, 'g'), 'adapter workspace quota import')[1];
-    const hostQuotaAlias = one(entry.source, new RegExp(`(${ID})=${escape(entry.args[2])}\\("eLmE"\\)`, 'g'), 'adapter account quota import')[1];
-    const quota = one(entry.source, new RegExp(`(${ID})=\\(0,(${ID})\\.Ul\\)\\("local"===(${ID})&&${escape(quotaAlias)}\\.U\\)`, 'g'), 'adapter quota');
-    const hostQuota = one(entry.source, new RegExp(`(${ID})=\\(0,${escape(quota[2])}\\._U\\)\\(${escape(hostQuotaAlias)}\\.F9,${escape(quota[3])}\\)`, 'g'), 'adapter account quota');
-    const thread = one(entry.source, new RegExp(`${escape(quota[3])}=\\(0,${escape(quota[2])}\\._U\\)\\(${ID}\\.qX,(${ID})\\)`, 'g'), 'adapter thread')[1];
-    patch(entry, [
-      { name: 'composer account quota', before: hostQuota[0], after: `codexLbExternal=codexLbExternalThread(${thread},${quota[3]}),` + hostQuota[0] + '&&!codexLbExternal' },
-      { name: 'composer adapter quota', before: quota[0], after: quota[0] + '&&!codexLbExternal' },
-    ]);
+    const quota = hostQuotaReason
+      ? one(entry.source, new RegExp(`(${ID})=\\(0,(${ID})\\._U\\)\\(${escape(quotaAlias)}\\.o,(${ID})\\)`, 'g'), 'adapter quota reason')
+      : one(entry.source, new RegExp(`(${ID})=\\(0,(${ID})\\.Ul\\)\\("local"===(${ID})&&${escape(quotaAlias)}\\.U\\)`, 'g'), 'adapter quota');
+    const thread = one(entry.source, new RegExp(`(?:let |,)${escape(quota[3])}=\\(0,${escape(quota[2])}\\._U\\)\\(${ID}\\.qX,(${ID})\\)`, 'g'), 'adapter thread')[1];
+    const check = `codexLbExternal=codexLbExternalThread(${thread},${quota[3]}),`;
+    if (hostQuotaReason) {
+      const readReason = quota[0].slice(quota[1].length + 1);
+      patch(entry, [{ name: 'composer adapter quota reason', before: quota[0], after: check + `codexLbQuotaReason=${readReason},${quota[1]}=codexLbExternal?"":codexLbQuotaReason` }]);
+    } else {
+      const hostQuotaAlias = one(entry.source, new RegExp(`(${ID})=${escape(entry.args[2])}\\("eLmE"\\)`, 'g'), 'adapter account quota import')[1];
+      const hostQuota = one(entry.source, new RegExp(`(${ID})=\\(0,${escape(quota[2])}\\._U\\)\\(${escape(hostQuotaAlias)}\\.F9,${escape(quota[3])}\\)`, 'g'), 'adapter account quota');
+      patch(entry, [
+        { name: 'composer account quota', before: hostQuota[0], after: check + hostQuota[0] + '&&!codexLbExternal' },
+        { name: 'composer adapter quota', before: quota[0], after: quota[0] + '&&!codexLbExternal' },
+      ]);
+    }
   }
   const capabilities = select(entry => entry.source.includes('requiresFirstPartyInference&&') && entry.source.includes('Explicit-host capability requires hostId:'), 'capability provider gate');
   for (const entry of capabilities) {
-    const gate = one(entry.source, new RegExp(`if\\((${ID})\\.requiresFirstPartyInference&&.{0,600}?isCapable:!(${ID})&&!(${ID})&&\\((${ID})\\?\\?"openai"\\)==="openai"\\}\\)\\}`, 'g'), 'capability gate');
+    const gate = one(entry.source, new RegExp(`if\\((?:${ID}\\.requiredRbacPermissions\\.length>0&&${ID}\\.push\\([^{};]{1,140}\\),)?(${ID})\\.requiresFirstPartyInference&&.{0,600}?isCapable:!(${ID})&&!(${ID})&&\\((${ID})\\?\\?"openai"\\)==="openai"\\}\\)\\}`, 'g'), 'capability gate');
     const request = one(entry.source, new RegExp('Explicit-host capability requires hostId: \\$\\{(' + ID + ')\\.name\\}', 'g'), 'capability request')[1];
     const comparison = `(${gate[4]}??"openai")==="openai"`;
     const allowed = `(${request}.name==="dictation"||${request}.name.startsWith("dictation.")||${request}.name==="orbit"||${request}.name==="orbit.navigation")`;
@@ -697,8 +721,10 @@ function transformWebpackWorkspaces(sources) {
   const one = (pattern, label) => unique([...code.matchAll(pattern)], label);
   const requireName = code.match(/^[^(]+\([^,]+,[^,]+,([^,)]+)\)/)[1];
   const imported = id => one(new RegExp(`(${ID})=${esc(requireName)}\\("${id}"\\)`, 'g'), 'sidebar import ' + id)[1];
-  const React = imported('zd8w'), jsx = imported('ABep'), atoms = imported('zTeN'), root = imported('OWtl');
-  const projects = imported('FHI1'), threads = imported('r6TF'), native = imported('DZgh'), priority = imported('Gjlg');
+  const React = imported('zd8w'), jsx = imported('ABep'), root = imported('OWtl');
+  const projects = imported('FHI1'), threads = imported('r6TF'), native = imported('DZgh');
+  const modern = code.includes(`${requireName}("qmMi")`);
+  const atoms = imported(modern ? 'qmMi' : 'zTeN'), priority = imported(modern ? 'gn7T' : 'Gjlg');
   const scopeCall = `(0,${atoms}.gh)(${root}.u)`;
   const selector = one(new RegExp(`(${ID})=\\(0,${esc(atoms)}\\._U\\)\\((${ID})\\.(${ID}),(${ID})\\),\\{orderedPinnedProjectGroups:`, 'g'), 'unified sidebar selector');
   const scope = 'codexLbWorkspaceScope';
@@ -719,7 +745,8 @@ function transformWebpackWorkspaces(sources) {
   }
   wrapCalls(new RegExp(`\\(0,${esc(atoms)}\\._U\\)\\(${esc(selector[2])}\\.${esc(selector[3])},${esc(selector[4])}\\)`, 'g'), 1, 'filterResult', 'workspace sidebar filtering');
   wrapCalls(new RegExp(`\\(0,${esc(atoms)}\\._U\\)\\(${esc(native)}\\.sS,(${ID}|"codex")\\)`, 'g'), 2, 'filterNative', 'workspace native sidebar filtering');
-  wrapCalls(new RegExp(`\\(0,${esc(atoms)}\\._U\\)\\(${esc(priority)}\\.(Be|p1|Vr|jU),(${ID}|"codex")\\)`, 'g'), 6, 'filterPriority', 'workspace priority filtering');
+  const priorityLists = modern ? 'Be|fB|jU' : 'Be|p1|Vr|jU';
+  wrapCalls(new RegExp(`\\(0,${esc(atoms)}\\._U\\)\\(${esc(priority)}\\.(?:${priorityLists}),(${ID}|"codex")\\)`, 'g'), modern ? 4 : 6, 'filterPriority', 'workspace priority filtering');
   const unifiedAt = code.indexOf('codexLbWorkspace.filterResult('), unifiedStart = code.lastIndexOf('function ', unifiedAt), unifiedEnd = code.indexOf('}function ', unifiedAt) + 1;
   assert(unifiedEnd > unifiedAt, 'Unsupported app layout: unified sidebar boundary');
   let unified = code.slice(unifiedStart, unifiedEnd);
