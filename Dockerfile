@@ -54,6 +54,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Switch to a high-speed global CDN mirror (Fastly)
+RUN sed -i 's/deb.debian.org/fastly.deb.debian.org/g' /etc/apt/sources.list.d/debian.sources || \
+    sed -i 's/deb.debian.org/fastly.deb.debian.org/g' /etc/apt/sources.list
+
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --only-upgrade \
         bsdutils gzip libblkid1 libc-bin libc6 libcap2 libmount1 libpcre2-8-0 \
