@@ -590,6 +590,8 @@ function webpackModules(sources) {
   return result;
 }
 
+const webpackAtomModules = ['zTeN', 'qmMi', 'Q840'];
+
 function transformWebpackUsage(sources) {
   const ID = '[A-Za-z_$][\\w$]*', entries = webpackModules(sources), output = new Map(), changes = [];
   const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -617,13 +619,21 @@ function transformWebpackUsage(sources) {
   };
   const composer = select(entry => entry.source.includes('dataUpdatedAt:') && entry.source.includes('isUsageBannerEnabled:') && entry.source.includes('rateLimitWarningThreshold:') && entry.source.includes('selectedModel:') && entry.source.includes('ComposerContent:'), 'composer');
   const importedModule = (entry, local, label) => one(entry.source, new RegExp(`(?:[ ,])${escape(local)}=${escape(entry.args[2])}\\("([^"]+)"\\)`, 'g'), label)[1];
-  const usageHead = (entry, label) => one(entry.source, new RegExp(`sendBlocked:${ID}\\}=function\\((${ID})\\)\\{let .{0,150}?\\{hostId:(${ID}),selectedModel:(${ID})(?:,settings:${ID})?\\}=\\1,(${ID})=void 0===\\2\\?"local":\\2,(${ID})=\\(0,(${ID})\\.gh\\)\\((${ID})\\.(${ID})\\);`, 'g'), label);
+  const usageHead = (entry, label) => one(entry.source, new RegExp(`sendBlocked:${ID}\\}=function\\((${ID})\\)\\{let .{0,150}?\\{hostId:(${ID}),selectedModel:(${ID})(?:,settings:${ID})?\\}=\\1,(${ID})=void 0===\\2\\?"local":\\2,(${ID})=\\(0,(${ID})\\.gh\\)\\((${ID})\\.(${ID})\\)([;,])`, 'g'), label);
   const quotaHead = usageHead(composer[0], 'usage hook');
   const atomModule = importedModule(composer[0], quotaHead[6], 'atom hooks module');
-  if (!['zTeN', 'qmMi'].includes(atomModule)) throw new Error('Unsupported webpack atom hooks module: ' + atomModule);
-  const hostQuotaReason = atomModule === 'qmMi';
+  if (!webpackAtomModules.includes(atomModule)) throw new Error('Unsupported webpack atom hooks module: ' + atomModule);
+  const hostQuotaReason = atomModule !== 'zTeN';
   const scopeAlias = quotaHead[7], scopeModule = importedModule(composer[0], scopeAlias, 'scope module');
-  const scopeResolver = one(composer[0].source.slice(quotaHead.index, quotaHead.index + 700), new RegExp(`\\(0,${escape(scopeAlias)}\\.(${ID})\\)\\(${escape(quotaHead[5])}\\)`, 'g'), 'thread resolver')[1];
+  let scopeResolver;
+  if (quotaHead[9] === ',') {
+    const resolvePattern = new RegExp(`(${ID})=\\(0,${escape(quotaHead[6])}\\.gh\\)\\(${escape(scopeAlias)}\\.${escape(quotaHead[8])}\\);${ID}\\[\\d+\\]!==\\1\\?\\(${ID}=\\(0,${escape(scopeAlias)}\\.(${ID})\\)\\(\\1\\)`, 'g');
+    const resolvers = new Set([...composer[0].source.matchAll(resolvePattern)].map(match => match[2]));
+    assert.equal(resolvers.size, 1, 'Unsupported webpack route thread resolver');
+    [scopeResolver] = resolvers;
+  } else {
+    scopeResolver = one(composer[0].source.slice(quotaHead.index, quotaHead.index + 700), new RegExp(`\\(0,${escape(scopeAlias)}\\.(${ID})\\)\\(${escape(quotaHead[5])}\\)`, 'g'), 'thread resolver')[1];
+  }
   const helpers = entry => {
     const req = entry.args[2];
     if (!req) throw new Error('Missing webpack require');
@@ -648,15 +658,25 @@ function transformWebpackUsage(sources) {
     const head = usageHead(entry, 'composer usage hook');
     const end = one(entry.source.slice(head.index), new RegExp(`rateLimitWarningThreshold:(${ID}),sendBlocked:(${ID})\\},.{0,350}?,(${ID})\\}\\((${ID})\\),`, 'g'), 'usage hook output');
     const hook = entry.source.slice(head.index, head.index + end.index + end[0].length);
-    const thread = one(hook, new RegExp(`let (${ID})=(${ID}),(${ID})="local"===${escape(head[5])}\\.value\\.kind`, 'g'), 'usage thread');
-    const injection = hostQuotaReason ? thread : one(hook, new RegExp(`let (${ID})=${ID}\\?\\?null,${ID}=\\(0,${ID}\\._U\\)\\(`, 'g'), 'usage provider hook insertion');
-    // The settings-aware hook uses the main-thread flag to trigger automatic quota-related model fallback.
-    const providerCheck = hostQuotaReason
-      ? `let ${thread[1]}=${thread[2]},codexLbExternal=codexLbExternalThread(${thread[1]},${head[4]}),${thread[3]}=!codexLbExternal&&"local"===${head[5]}.value.kind`
-      : `let codexLbExternal=codexLbExternalThread(${thread[1]},${head[4]});` + injection[0];
+    let before, after;
+    if (head[9] === ',') {
+      // The quota hook no longer reads the route thread. Use the thread of the composer that invoked it.
+      const afterHook = entry.source.slice(head.index + hook.length);
+      const thread = one(afterHook.slice(0, 250), new RegExp(`^${ID}=\\(0,(${ID})\\._U\\)\\((${ID})\\.JN,(${ID})\\),${ID}=\\(0,\\1\\._U\\)\\(\\2\\.SG,\\3\\)`, 'g'), 'composer thread')[3];
+      before = head[0];
+      after = before + `codexLbExternal=codexLbExternalThread(${thread},${head[4]}),`;
+    } else {
+      const thread = one(hook, new RegExp(`let (${ID})=(${ID}),(${ID})="local"===${escape(head[5])}\\.value\\.kind`, 'g'), 'usage thread');
+      const injection = hostQuotaReason ? thread : one(hook, new RegExp(`let (${ID})=${ID}\\?\\?null,${ID}=\\(0,${ID}\\._U\\)\\(`, 'g'), 'usage provider hook insertion');
+      before = injection[0];
+      // The settings-aware hook uses the main-thread flag to trigger automatic quota-related model fallback.
+      after = hostQuotaReason
+        ? `let ${thread[1]}=${thread[2]},codexLbExternal=codexLbExternalThread(${thread[1]},${head[4]}),${thread[3]}=!codexLbExternal&&"local"===${head[5]}.value.kind`
+        : `let codexLbExternal=codexLbExternalThread(${thread[1]},${head[4]});` + before;
+    }
     const tail = `,${end[3]}}(${end[4]}),`;
     patch(entry, [
-      { name: 'composer usage provider', before: injection[0], after: providerCheck },
+      { name: 'composer usage provider', before, after },
       { name: 'composer usage output', before: tail, after: `,codexLbExternal?{...${end[3]},rateLimit:null,rateLimitWarningThreshold:null,isUsageBannerEnabled:!1,sendBlocked:!1}:${end[3]}}(${end[4]}),` },
     ]);
   }
@@ -723,8 +743,9 @@ function transformWebpackWorkspaces(sources) {
   const imported = id => one(new RegExp(`(${ID})=${esc(requireName)}\\("${id}"\\)`, 'g'), 'sidebar import ' + id)[1];
   const React = imported('zd8w'), jsx = imported('ABep'), root = imported('OWtl');
   const projects = imported('FHI1'), threads = imported('r6TF'), native = imported('DZgh');
-  const modern = code.includes(`${requireName}("qmMi")`);
-  const atoms = imported(modern ? 'qmMi' : 'zTeN'), priority = imported(modern ? 'gn7T' : 'Gjlg');
+  const atomModule = unique(webpackAtomModules.filter(id => code.includes(`${requireName}("${id}")`)), 'sidebar atom module');
+  const modern = atomModule !== 'zTeN';
+  const atoms = imported(atomModule), priority = imported(modern ? 'gn7T' : 'Gjlg');
   const scopeCall = `(0,${atoms}.gh)(${root}.u)`;
   const selector = one(new RegExp(`(${ID})=\\(0,${esc(atoms)}\\._U\\)\\((${ID})\\.(${ID}),(${ID})\\),\\{orderedPinnedProjectGroups:`, 'g'), 'unified sidebar selector');
   const scope = 'codexLbWorkspaceScope';

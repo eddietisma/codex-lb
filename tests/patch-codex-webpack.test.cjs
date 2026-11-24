@@ -38,15 +38,27 @@ function check(request,host,provider){if(host==null)throw Error(\`Explicit-host 
 }
 };`;
 
-function usageEntrypoints({ provider, configuredProvider = 'openai', targetHost = 'local', thread = 'existing' }) {
-  const { output } = transformWebpackUsage(new Map([['usage.js', usageFixture]]));
+const currentUsageFixture = usageFixture.replaceAll('qmMi', 'Q840').replace(/composer\(e,t,n\)\{[\s\S]+?(?=banner\(e,t,n\))/, `composer(e,t,n){
+var hooks=n("Q840"), route=n("route"), metadata=n("metadata");
+n.d(t,{ComposerContent:()=>ComposerContent});
+function routeThread(){let active,cache=[],scope=(0,hooks.gh)(route.ctx);cache[0]!==scope?(active=(0,route.resolve)(scope),cache[0]=scope):active=cache[1];return active}
+function ComposerContent(input,thread){let {sendBlocked:blocked}=function(opts){let threshold=1,{hostId:h,selectedModel:m}=opts,host=void 0===h?"local":h,scope=(0,hooks.gh)(route.ctx),account=0;
+let out={dataUpdatedAt:1,selectedModel:m,isUsageBannerEnabled:true,rateLimit:10,rateLimitWarningThreshold:threshold,sendBlocked:true},end=0;return end,out}(input),cwd=(0,hooks._U)(metadata.JN,thread),service=(0,hooks._U)(metadata.SG,thread);return blocked}
+},
+`);
+
+function usageEntrypoints({ provider, configuredProvider = 'openai', targetHost = 'local', thread = 'existing' }, fixture = usageFixture) {
+  const { output } = transformWebpackUsage(new Map([['usage.js', fixture]]));
   const modules = vm.runInNewContext(output.get('usage.js').replace('export const ', 'const ') + '\n;__webpack_modules__');
+  const hooks = { _U: (read, input) => read(input), gh: () => ({ value: { kind: 'local' } }) };
   const imports = {
-    qmMi: { _U: (read, input) => read(input), gh: () => ({ value: { kind: 'local' } }) },
+    qmMi: hooks,
+    Q840: hooks,
     route: { resolve: () => thread },
     target: { targetAtom: () => ({ cwd: '/repo', hostId: targetHost }) },
     config: { configAtom: () => ({ data: { model_provider: configuredProvider } }) },
-    provider: { threadProvider: () => provider },
+    provider: { threadProvider: typeof provider === 'function' ? provider : () => provider },
+    metadata: { JN: () => '/repo', SG: () => null },
     threads: { qX: () => 'local' },
     a6kU: { o: () => 'reserve-limit,usage-limit' },
   };
@@ -80,6 +92,17 @@ test('quota blocks and automatic fallback are suppressed only for the matching c
     const adapterThread = state.thread === undefined ? 'existing' : state.thread;
     assert.equal(ui.CodexComposerAdapter(adapterThread).submitDisabled, blocked ? 'reserve-limit,usage-limit' : '');
   }
+});
+
+test('the 26.1120 composer uses its own thread rather than the active route for quota state', () => {
+  const ui = usageEntrypoints({
+    thread: 'external',
+    provider: thread => thread === 'external' ? 'codex-lb' : 'openai',
+  }, currentUsageFixture);
+  const input = { hostId: 'local', selectedModel: 'test' };
+  assert.equal(ui.ComposerContent(input, 'openai'), true);
+  assert.equal(ui.ComposerContent(input, 'external'), false);
+  assert.equal(ui.state().sendBlocked, false);
 });
 
 test('the first-party exception on the new layout stays limited to dictation and navigation', () => {

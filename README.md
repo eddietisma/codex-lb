@@ -12,7 +12,7 @@ The upstream license and attribution files are retained in `source/`. The previo
 
 For native model catalogue discovery, set `api_key_model_discovery = true` under `[features]` in the client's `config.toml` and set `model_catalog_url` under `[model_providers.codex-lb]` to the LB's `/backend-api/codex/models` endpoint. Restart Codex after enabling discovery. Context window values then come from the LB's Model catalogue settings; no Desktop catalogue patch or numeric client context override is needed.
 
-On Windows, `Patch-Codex.ps1` prepares and launches a patched copy of the Codex Store app without changing the installed package. After a Store update, run the script with `-CheckOnly` to check compatibility without preparing a copy or restarting Codex.
+On Windows, `Patch-Codex.ps1` prepares and launches a patched copy of the Codex Store app without changing the installed package. The latest verified Store version is `26.1120.5083.0`. After a Store update, run the script with `-CheckOnly` to check compatibility without preparing a copy or restarting Codex.
 
 ## Run locally
 
